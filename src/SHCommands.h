@@ -92,8 +92,22 @@ void Command_Features()
 
 void Command_RGBLEDSCount()
 {
+#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+	FlowSerialWrite((byte)(neoPixelBusCount()));
+#else
 	FlowSerialWrite((byte)(0));
+#endif
 	FlowSerialFlush();
+}
+
+void Command_RGBLEDSData()
+{
+#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+	neoPixelBusRead();
+	neoPixelBusShow();
+#endif
+	// Acq !
+	FlowSerialWrite(0x15);
 }
 
 void Command_RGBMatrixData()

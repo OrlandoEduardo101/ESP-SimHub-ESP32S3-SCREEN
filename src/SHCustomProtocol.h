@@ -4,7 +4,39 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include <map>
+#include "logo_image.h"  // Logo image array
 
+// WT32-SC01 Plus - ST7796 via 8-bit MCU (8080) parallel interface (320x480)
+// IMPORTANT: WT32-SC01 Plus uses 8-bit parallel interface, NOT SPI!
+// Pinout according to official WT32-SC01 Plus documentation:
+// https://github.com/Cesarbautista10/WT32-SC01-Plus-ESP32
+#if 1  // Always use ST7796 for WT32-SC01 Plus
+// LCD Interface pins (8-bit MCU 8080)
+#define TFT_BL 45    // BL_PWM - Backlight control (active high)
+#define TFT_RST 4    // LCD_RESET - LCD reset (multiplexed with touch reset)
+#define TFT_RS 0     // LCD_RS - Command/Data selection
+#define TFT_WR 47    // LCD_WR - Write clock
+#define TFT_TE 48    // LCD_TE - Frame sync (optional, can use -1 if not needed)
+// 8-bit data bus (LCD_DB0 to LCD_DB7)
+#define TFT_D0 9
+#define TFT_D1 46
+#define TFT_D2 3
+#define TFT_D3 8
+#define TFT_D4 18
+#define TFT_D5 17
+#define TFT_D6 16
+#define TFT_D7 15
+
+// Use 8-bit parallel interface for ESP32-S3
+// Arduino_ESP32PAR8 supports 8-bit MCU (8080) interface for ESP32, ESP32-S2, and ESP32-S3
+// Constructor: dc, cs, wr, rd, d0, d1, d2, d3, d4, d5, d6, d7
+// Note: Using PAR8 instead of LCD8 to avoid "no free i80 bus slot" error
+// IMPORTANT: Objects created as pointers and initialized in setup() to avoid initialization issues
+// Creating them in setup() instead of globally prevents "no free i80 bus slot" error
+Arduino_DataBus *bus = nullptr;
+Arduino_ST7796 *gfx = nullptr;
+#else
+// RGB Panel displays (480x272 or 800x480) - not used for WT32-SC01 Plus
 #define TFT_BL 2 // backlight pin
 
 // 4827S043 - 480x270, no touch
@@ -28,9 +60,9 @@ Arduino_ESP32RGBPanel *rgbpanel = new Arduino_ESP32RGBPanel(
 //    0 /* vsync_polarity */, 4 /* vsync_front_porch */, 4 /* vsync_pulse_width */, 4 /* vsync_back_porch */,
 //    1 /* pclk_active_neg */, 16000000 /* prefer_speed */);
 
-
 Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
     PIXEL_WIDTH /* width */, PIXEL_HEIGHT /* height */, rgbpanel, 0 /* rotation */, true /* auto_flush */);
+#endif
 
 static const int SCREEN_WIDTH = PIXEL_WIDTH;
 static const int SCREEN_HEIGHT = PIXEL_HEIGHT;
@@ -80,31 +112,185 @@ private:
 
 	int cellTitleHeight = 0;
 	bool hasReceivedData = false;
+	bool displayEnabled = true;  // Display enabled for dashboard
+
+	// Helper function to safely use display
+	bool canUseDisplay() {
+		return displayEnabled && gfx != nullptr;
+	}
+
+	// Show loading screen with real PNG logo image
+	void showLoadingScreen() {
+		if (!canUseDisplay()) return;
+
+		Serial.println("Displaying loading screen with logo...");
+
+		// Fill screen with black background
+		gfx->fillScreen(BLACK);
+
+		// Calculate logo position - center horizontally, position in upper part of screen
+		// Leave space at bottom for "Loading" text
+		int logoX = (SCREEN_WIDTH - LOGO_WIDTH) / 2;   // Center horizontally
+
+		// Position logo in upper-middle area, leaving space for text below
+		// Calculate space needed for text (estimate ~40 pixels)
+		int textAreaHeight = 50;  // Space reserved for loading text
+		int availableHeight = SCREEN_HEIGHT - textAreaHeight;
+		int logoY = (availableHeight - LOGO_HEIGHT) / 2;  // Center in available area
+
+		// Draw the logo image centered, preserving transparency
+		// Pixels with value 0x0000 (black) are treated as transparent and skipped
+		for (int y = 0; y < LOGO_HEIGHT; y++) {
+			for (int x = 0; x < LOGO_WIDTH; x++) {
+				uint16_t pixel = pgm_read_word(&logo_image[y][x]);
+				// Skip transparent pixels (black = 0x0000)
+				if (pixel != 0x0000) {
+					gfx->drawPixel(logoX + x, logoY + y, pixel);
+				}
+			}
+		}
+
+		// Show loading text below the logo
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(2);
+		int16_t x1, y1;
+		uint16_t w, h;
+		String loadingText = "Loading...";
+		gfx->getTextBounds(loadingText, 0, 0, &x1, &y1, &w, &h);
+		int textX = (SCREEN_WIDTH - w) / 2;
+		int textY = logoY + LOGO_HEIGHT + 20;  // Position below logo with spacing
+
+		// Draw semi-transparent background for text
+		gfx->fillRect(textX - 5, textY - 2, w + 10, h + 4, RGB565(0, 0, 0)); // Black with some transparency effect
+
+		gfx->setCursor(textX, textY);
+		gfx->print(loadingText);
+
+		// Animate loading dots
+		for (int i = 0; i < 3; i++) {
+			delay(400);
+			// Clear text area
+			gfx->fillRect(textX - 5, textY - 2, w + 10, h + 4, RGB565(0, 0, 0));
+
+			String dots = "Loading";
+			for (int j = 0; j <= i; j++) {
+				dots += ".";
+			}
+			gfx->getTextBounds(dots, 0, 0, &x1, &y1, &w, &h);
+			textX = (SCREEN_WIDTH - w) / 2;
+			gfx->setCursor(textX, textY);
+			gfx->print(dots);
+		}
+
+		delay(800);
+
+		// Clear screen for dashboard
+		gfx->fillScreen(BLACK);
+		Serial.println("Loading screen completed");
+	}
 public:
 	void setup() {
-		gfx->begin();
-	    gfx->fillScreen(BLACK);
+		// Initialize display for dashboard
+		displayEnabled = true;
 
-	#ifdef TFT_BL
-		pinMode(TFT_BL, OUTPUT);
-		digitalWrite(TFT_BL, HIGH);
-	#endif
-		gfx->setTextColor(RGB565(0xff, 0x66, 0x00));
-		drawCentreCentreString(DEVICE_NAME, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 4, gfx);
-		gfx->setCursor(0, 0);
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(1);
+		if (displayEnabled) {
+			// Create bus and display objects here to avoid "no free i80 bus slot" error
+			// Creating them in setup() instead of globally ensures proper initialization order
+			if (bus == nullptr) {
+				Serial.println("Creating 8-bit parallel bus object...");
+				bus = new Arduino_ESP32PAR8(
+					TFT_RS,      // DC/RS pin (LCD_RS = GPIO 0)
+					-1,          // CS pin (not used for 8080 interface)
+					TFT_WR,      // WR pin (LCD_WR = GPIO 47)
+					-1,          // RD pin (not used for 8080 interface)
+					TFT_D0, TFT_D1, TFT_D2, TFT_D3, TFT_D4, TFT_D5, TFT_D6, TFT_D7  // 8 data pins
+				);
+			}
+
+			if (gfx == nullptr && bus != nullptr) {
+				Serial.println("Creating ST7796 display object...");
+				// Rotation: 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
+				gfx = new Arduino_ST7796(bus, TFT_RST, 1 /* rotation = landscape */, true /* IPS */);
+			}
+
+			// Initialize backlight first - GPIO 45 according to WT32-SC01 Plus documentation
+		#ifdef TFT_BL
+			if (TFT_BL >= 0 && TFT_BL < 48) {  // ESP32-S3 has GPIOs 0-48
+				pinMode(TFT_BL, OUTPUT);
+				digitalWrite(TFT_BL, LOW);  // Start with backlight off
+				delay(10);
+				Serial.print("Backlight pin configured: GPIO ");
+				Serial.println(TFT_BL);
+			}
+		#endif
+
+			// Initialize display with error handling
+			if (gfx != nullptr && bus != nullptr) {
+				Serial.println("Initializing display (8-bit parallel interface)...");
+				Serial.flush();
+
+				// Small delay before initialization to ensure everything is ready
+				delay(100);
+
+				// Initialize 8-bit parallel interface
+				// Note: Arduino_ESP32PAR8 uses I80 bus internally
+				bool busOk = bus->begin();
+				if (!busOk) {
+					Serial.println("ERROR: Failed to initialize data bus!");
+					Serial.println("This may indicate 'no free i80 bus slot' error");
+					displayEnabled = false;
+					return;
+				}
+				Serial.println("Data bus initialized successfully");
+				Serial.flush();
+
+				// Initialize display
+				bool displayOk = gfx->begin();
+				if (!displayOk) {
+					Serial.println("ERROR: Failed to initialize display!");
+					displayEnabled = false;
+					return;
+				}
+				Serial.println("Display controller initialized");
+				Serial.flush();
+
+				delay(300);  // Give display time to stabilize
+
+				// Turn on backlight after display is ready
+		#ifdef TFT_BL
+				if (TFT_BL >= 0 && TFT_BL < 48) {
+					digitalWrite(TFT_BL, HIGH);
+					delay(100);
+					Serial.println("Backlight enabled");
+				}
+		#endif
+
+				gfx->fillScreen(BLACK);
+				delay(100);
+
+				// Show loading screen with logo
+				showLoadingScreen();
+
+				Serial.println("Display initialized successfully!");
+				Serial.println("Loading screen displayed");
+			} else {
+				Serial.println("ERROR: Display or bus object is null!");
+				displayEnabled = false;
+			}
+		}
 	}
 
 	// Called when new data is coming from computer
 	void read() {
 		if (!hasReceivedData) {
 			hasReceivedData = true;
-			gfx->fillScreen(BLACK);
+			if (displayEnabled && gfx != nullptr) {
+				gfx->fillScreen(BLACK);
+			}
 		}
 		String full = "";
 
-		speed = FlowSerialReadStringUntil(';').toInt();
+		speed = String(FlowSerialReadStringUntil(';').toInt());
 		gear = FlowSerialReadStringUntil(';');
 		rpmPercent = FlowSerialReadStringUntil(';').toInt();
 		rpmRedLineSetting = FlowSerialReadStringUntil(';').toInt();
@@ -130,7 +316,7 @@ public:
 		const String rest = FlowSerialReadStringUntil('\n');
 	}
 
-	// Called once per arduino loop, timing can't be predicted, 
+	// Called once per arduino loop, timing can't be predicted,
 	// but it's called between each command sent to the arduino
 	void loop() {
 		if (!hasReceivedData) {
@@ -151,7 +337,7 @@ public:
 		// Fourth+Fifth Column (delta)
 		drawCell(SCREEN_WIDTH, ROW[1], sessionBestLiveDeltaSeconds, "sessionBestLiveDeltaSeconds", "Delta", "right", sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
 		drawCell(SCREEN_WIDTH, ROW[2], sessionBestLiveDeltaProgressSeconds, "sessionBestLiveDeltaProgressSeconds", "Delta P", "right", sessionBestLiveDeltaProgressSeconds.indexOf('-') >= 0 ? GREEN : RED);
-		
+
 
 		// (TC, ABS, BB)
 		if (isTCCutNull == "False") {
@@ -174,6 +360,7 @@ public:
 
 	void drawGear(int32_t x, int32_t y)
 	{
+		if (!canUseDisplay()) return;
 		// draw gear only when it changes
 		if (gear != prev_gear)
 		{
@@ -195,6 +382,7 @@ public:
 
 	void drawRpmMeter(int32_t x, int32_t y, int width, int height)
 	{
+		if (!canUseDisplay()) return;
 		int meterWidth = (width * rpmPercent) / 100;
 
 		int yPlusOne = y + 1;
@@ -221,7 +409,7 @@ public:
 
 		// draw the frame only if it's not there
 		if (prev_rpmPercent == 50) gfx->drawRect(x, y, width, height-2, WHITE);
-		
+
 		prev_rpmPercent = rpmPercent;
 	}
 
@@ -249,7 +437,7 @@ public:
 
 			if (align == "left")
 			{
-				
+
 				if (colorChanged) gfx->drawRoundRect(x, y, CELL_WIDTH * 2 - 1, CELL_HEIGHT - 2, 4, color);		// Rectangle
 				if (colorChanged) drawString(name, x + hPadding, y + vPadding, 2, gfx);						// Title
 				drawString(data, x + hPadding, y + titleAreaHeight, fontSize, gfx); // Data
@@ -275,7 +463,7 @@ public:
 				int16_t y1 = 0;
 				uint16_t width = 0;
 				uint16_t height = 0;
-				
+
 				auto dataY = y + titleAreaHeight;
 				// calculate the size of the rectangle to "clear"
 				gfx->getTextBounds(prevData[id], x, dataY, &x1, &y1, &width, &height);
