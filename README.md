@@ -166,18 +166,34 @@ Key configuration options in `src/main.cpp`:
 
 ## 🔧 Troubleshooting
 
+### SimHub Connection Issues
+
+#### **"Unrecognized, Invalid version" Error - FIXED**
+
+**Problem**: SimHub detected the device but rejected the connection with error "Invalid version (2d)".
+
+**Root Cause**: The `Command_Hello()` function in `src/SHCommands.h` was sending an extra byte `0x01` before the VERSION character, causing protocol corruption:
+```cpp
+// ❌ WRONG - Was sending: 0x01 + 'j'
+FlowSerialWrite(0x01);      // Extra byte!
+FlowSerialPrint(VERSION);   // VERSION character
+```
+
+**Solution**: Removed the extra `0x01` byte. SimHub protocol expects only the VERSION character:
+```cpp
+// ✅ CORRECT - Now sends only: 'j'
+FlowSerialPrint(VERSION);   // Only VERSION character
+```
+
+**Status**: ✅ Resolved - Device now connects and communicates correctly with SimHub
+
+---
+
 ### Display Not Turning On
 
 - Verify backlight pin (GPIO 45) is configured correctly
 - Check display initialization logs in serial monitor
 - Ensure 8-bit parallel interface is properly configured
-
-### SimHub Not Connecting
-
-- Verify COM port is correct (check Device Manager on Windows)
-- Ensure USB-Serial/JTAG is recognized (should show as "USB JTAG/serial debug unit")
-- Check baud rate matches (19200 by default)
-- Try resetting the device
 
 ### Upload Issues
 
@@ -190,6 +206,7 @@ Key configuration options in `src/main.cpp`:
 - **"no free i80 bus slot"**: Display objects are created in `setup()` to avoid this
 - **"USB Desconhecido"**: Using USB-Serial/JTAG instead of USB CDC resolves this
 - **Display stretched**: Logo conversion script maintains aspect ratio automatically
+- **ESP32 entering download mode on SimHub connection**: Fixed by adding GPIO0 INPUT_PULLUP to prevent DTR/RTS signals from triggering bootloader
 
 ## 📚 Additional Resources
 

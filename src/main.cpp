@@ -1,17 +1,12 @@
 #include <Arduino.h>
-#include <WiFi.h>  // Needed for getUniqueId() even if WiFi is disabled
 #include <EspSimHub.h>
 #include <Arduino_GFX_Library.h>
+#include "esp_system.h"
 
 #define DEVICE_NAME "ESP-SimHubDisplay"
-
-// Display configuration - uncomment the one you're using
-// For WT32-SC01 Plus (ST7796, 320x480 portrait, 480x320 landscape)
-// Note: We're using USB-Serial/JTAG (not USB CDC) for better Windows compatibility
-// Display is configured for landscape (horizontal) orientation
-#define PIXEL_WIDTH 480   // Landscape width
-#define PIXEL_HEIGHT 320  // Landscape height
-#define SCREEN_WIDTH_MM 70 // approximate screen width in mm for WT32-SC01 Plus
+#define PIXEL_WIDTH 480
+#define PIXEL_HEIGHT 272
+#define SCREEN_WIDTH_MM 95 // only the screen area with pixels, in mm. Can be approximate, used to calculate density
 #define PIXEL_PER_MM (PIXEL_WIDTH / SCREEN_WIDTH_MM)
 
 #define INCLUDE_WIFI false
@@ -35,11 +30,12 @@
 #include <TcpSerialBridge2.h>
 #include <ECrowneWifi.h>
 #include <FullLoopbackStream.h>
-
 FullLoopbackStream outgoingStream;
 FullLoopbackStream incomingStream;
 
 #endif // INCLUDE_WIFI
+
+// FlowSerial uses default Serial (USB CDC)
 
 #include <FlowSerialRead.h>
 #include <SHCustomProtocol.h>
@@ -54,68 +50,109 @@ char loop_opt;
 char xactionc;
 unsigned long lastSerialActivity = 0;
 
-void idle(bool critical);
+RTC_DATA_ATTR uint32_t bootCount = 0;
 
+// Dummy debug port (no actual output)
+Stream* DebugPort = nullptr;
+
+void idle(bool critical);
 
 // Don't change this
 #define VERSION 'j'
 
 #include <SHCommands.h>
 
+// Simple helper to mirror logs to both Serial (if alive) and the LCD terminal
+void screenLog(const String &msg) {
+	if (gfx) {
+		terminalPrintln(msg, gfx);
+	}
+	Serial.println(msg);
+	// NO delay - prevents watchdog timeout
+}
+
+const char* resetReasonStr(esp_reset_reason_t reason) {
+	switch (reason) {
+		case ESP_RST_POWERON: return "POWERON";
+		case ESP_RST_EXT:     return "EXT";
+		case ESP_RST_SW:      return "SW";
+		case ESP_RST_PANIC:   return "PANIC";
+		case ESP_RST_INT_WDT: return "INT_WDT";
+		case ESP_RST_TASK_WDT:return "TASK_WDT";
+		case ESP_RST_WDT:     return "WDT";
+		case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+		case ESP_RST_BROWNOUT:return "BROWNOUT";
+		case ESP_RST_SDIO:    return "SDIO";
+		default:              return "UNKNOWN";
+	}
+}
+
 void setup(void)
 {
-  // ESP32-S3 uses USB-Serial/JTAG by default (no special configuration needed)
-  // This is the "USB JTAG/serial debug unit" that Windows recognizes automatically
-  // Give it a moment to initialize, especially on Windows
-  delay(1000);
-
-  // Initialize WiFi (needed for getUniqueId() even if not using WiFi)
-  // This allows us to get the MAC address for device identification
-  WiFi.mode(WIFI_OFF); // Turn off WiFi but keep it available for MAC address
-
-  // Initialize Serial - USB-Serial/JTAG needs Serial.begin() to be called
-  Serial.begin(19200);
-  delay(500); // Give Serial time to be ready
-
-  // FlowSerialBegin initializes the ARQSerial library
-  FlowSerialBegin(19200);
-
-  shCustomProtocol.setup();
-  arqserial.setIdleFunction(idle);
-
-#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
-  neoPixelBusBegin();
-#endif
-
-#if INCLUDE_WIFI
-#if DEBUG_TCP_BRIDGE
+	// Configure GPIO0 with strong pull-up to prevent entering download mode
+	// This is critical for WT32-SC01 Plus when SimHub opens the serial port
+	pinMode(0, INPUT_PULLUP);
+  
+	// Small delay to stabilize GPIO0 before USB CDC initialization
+	delay(100);
+  
+	// Initialize Serial FIRST with explicit begin()
 	Serial.begin(115200);
-#endif
-#endif
+  
+	// Wait for USB CDC to enumerate - critical for USB CDC mode
+	// This blocks until the host recognizes the device
+	unsigned long start = millis();
+	while (!Serial && (millis() - start) < 3000) {
+		delay(10);
+	}
+  
+	// Additional delay to stabilize
+	delay(200);
+  
+	bootCount++;
+	screenLog("BOOT: start #" + String(bootCount));
+	screenLog(String("Reset:") + resetReasonStr(esp_reset_reason()));
+	screenLog("Heap=" + String(ESP.getFreeHeap()) + " PSRAM=" + String(ESP.getFreePsram()));
 
-#if INCLUDE_WIFI
-	ECrowneWifi::setup(&outgoingStream, &incomingStream, gfx);
-#endif
+	// Bring up display and protocol so we can show logs on screen
+	shCustomProtocol.setup();
+	arqserial.setIdleFunction(idle);
+	screenLog("Display init OK");
 }
 
 void loop()
 {
+  static bool waitingLogged = false;
+
+  if (!waitingLogged && millis() > 500) {
+    screenLog("Aguardando SimHub...");
+    waitingLogged = true;
+  }
+
 #if INCLUDE_WIFI
-	ECrowneWifi::loop();
+  ECrowneWifi::loop();
 #endif
 
+  // Re-enabled: display updates
   shCustomProtocol.loop();
+  yield(); // Feed watchdog
 
 	if (FlowSerialAvailable() > 0) {
-		int header = FlowSerialTimedRead();
-		if (header == MESSAGE_HEADER)
+		int r = FlowSerialTimedRead();
+		if (r == MESSAGE_HEADER)
 		{
 			lastSerialActivity = millis();
-			// Read command
 			loop_opt = FlowSerialTimedRead();
+			yield(); // Feed watchdog
+			
 			switch(loop_opt) {
-				case '1': Command_Hello(); break;
-				case '0': Command_Features(); break;
+				case '1':
+					Command_Hello();
+					yield();
+					break;
+				case '0': 
+					Command_Features(); 
+					break;
 				case '4': Command_RGBLEDSCount(); break;
 				case '6': Command_RGBLEDSData(); break;
 				case 'X': {
@@ -141,10 +178,6 @@ void loop()
 }
 
 void idle(bool critical) {
-#if INCLUDE_WIFI
-	yield();
-	ECrowneWifi::flush();
-#endif
-
-	shCustomProtocol.idle();
+	yield(); // Feed watchdog
+	shCustomProtocol.idle();  // Re-enabled: idle updates
 }

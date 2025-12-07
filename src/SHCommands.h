@@ -1,12 +1,22 @@
 #define MESSAGE_HEADER 0x03
+// Debug UART defined in main.cpp
+extern Stream* DebugPort;
 
 
 void Command_Hello()
 {
-	FlowSerialTimedRead();
+	if (DebugPort) {
+		DebugPort->println("[DBG] Command_Hello called!");
+		DebugPort->flush();
+	}
+	FlowSerialTimedRead();  // Read trailer byte
 	delay(10);
-	FlowSerialPrint(VERSION);
+	FlowSerialPrint(VERSION);  // Send only VERSION character
 	FlowSerialFlush();
+	if (DebugPort) {
+		DebugPort->println("[DBG] Command_Hello response sent!");
+		DebugPort->flush();
+	}
 }
 
 void Command_SetBaudrate()
