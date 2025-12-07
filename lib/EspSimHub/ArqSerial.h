@@ -10,6 +10,9 @@
 #define StreamAvailable Serial.available
 #endif
 
+// Debug stream declared in main.cpp (can be USB CDC or UART)
+extern Stream* DebugPort;
+
 #include <Arduino.h>
 #include <RingBuf.h>
 
@@ -59,20 +62,38 @@ private:
 		byte currentCrc;
 
 		while (StreamAvailable() > 0) {
+			if (DebugPort) {
+				DebugPort->print("[DBG] StreamAvailable=");
+				DebugPort->println(StreamAvailable());
+				DebugPort->flush();
+			}
 			header = Arq_TimedRead();
-			//DebugPrintLn("hello1");
+			if (DebugPort) {
+				DebugPort->print("[DBG] header=");
+				DebugPort->println(header, HEX);
+			}
 			currentCrc = 0;
 
 			if (header == 0x01) {
 				byte failureReason = 0x00;
+				if (DebugPort) DebugPort->println("[DBG] header 0x01 detected");
 
 				header = Arq_TimedRead();
+				if (DebugPort) {
+					DebugPort->print("[DBG] second header=");
+					DebugPort->println(header, HEX);
+				}
 				if (header != 0x01) {
+					if (DebugPort) DebugPort->println("[DBG] second header not 0x01, abort");
 					return;
 				}
 
 				// read id of packet
 				packetID = Arq_TimedRead(); // ?
+				if (DebugPort) {
+					DebugPort->print("[DBG] packetID=");
+					DebugPort->println(packetID);
+				}
 				if (packetID < 0) {
 					failureReason = 0x01; // bad id
 					SendNAcq(Arq_LastValidPacket, failureReason);
@@ -81,6 +102,10 @@ private:
 
 				// read length of data
 				length = Arq_TimedRead(); // 1
+				if (DebugPort) {
+					DebugPort->print("[DBG] length=");
+					DebugPort->println(length);
+				}
 				if (length <= 0 || length > 32) {
 					failureReason = 0x02; // bad length
 					SendNAcq(Arq_LastValidPacket, failureReason);
@@ -91,6 +116,9 @@ private:
 				for (i = 0; i < length && !failureReason; i++) {
 					res = Arq_TimedRead(); // 3 49 16
 					partialdatabuffer[i] = res;
+					if (DebugPort) {
+						DebugPort->print("[DBG] data["); DebugPort->print(i); DebugPort->print("]="); DebugPort->println(res, HEX);
+					}
 					if (res < 0) {
 						failureReason = 0x05; // bad data
 						SendNAcq(Arq_LastValidPacket, failureReason);
@@ -100,6 +128,7 @@ private:
 
 				// read checksum
 				crc = Arq_TimedRead(); // 106
+				if (DebugPort) { DebugPort->print("[DBG] crc recv="); DebugPort->println(crc, HEX); }
 				if (crc < 0) {
 					failureReason = 0x03; // bad data b/c no checksum
 					SendNAcq(Arq_LastValidPacket, failureReason);
@@ -113,6 +142,7 @@ private:
 					currentCrc = updateCrc(currentCrc, partialdatabuffer[i]);
 				}
 
+				if (DebugPort) { DebugPort->print("[DBG] crc calc="); DebugPort->println(currentCrc, HEX); }
 				if (crc != currentCrc) {
 					failureReason = 0x04; // bad data b/c checksum doesnt match
 					SendNAcq(Arq_LastValidPacket, failureReason);
@@ -135,6 +165,7 @@ private:
 					SendAcq(packetID);
 				}
 #else
+				if (DebugPort) { DebugPort->print("[DBG] SendAcq id="); DebugPort->println(packetID); }
 				SendAcq(packetID);
 #endif
 			}
@@ -180,6 +211,10 @@ public:
 		unsigned long fsr_startMillis = millis();
 		do {
 			if (idleFunction != 0) idleFunction(false);
+
+			if (DataBuffer.size() > 0) {
+				if (DebugPort) { DebugPort->print("[DBG] DataBuffer size="); DebugPort->println(DataBuffer.size()); }
+			}
 
 			if (DataBuffer.size() > 0) {
 				uint8_t res = 0;

@@ -166,26 +166,26 @@ private:
 		gfx->setCursor(textX, textY);
 		gfx->print(loadingText);
 
-		// Animate loading dots
-		for (int i = 0; i < 3; i++) {
-			delay(400);
-			// Clear text area
-			gfx->fillRect(textX - 5, textY - 2, w + 10, h + 4, RGB565(0, 0, 0));
+		// COMMENTED OUT: Animation with delays was blocking firmware responsiveness
+		// The firmware needs to respond to SimHub commands immediately
+		// Just show static loading screen instead of animated dots
+		// for (int i = 0; i < 3; i++) {
+		// 	delay(400);
+		// 	// Clear text area
+		// 	gfx->fillRect(textX - 5, textY - 2, w + 10, h + 4, RGB565(0, 0, 0));
 
-			String dots = "Loading";
-			for (int j = 0; j <= i; j++) {
-				dots += ".";
-			}
-			gfx->getTextBounds(dots, 0, 0, &x1, &y1, &w, &h);
-			textX = (SCREEN_WIDTH - w) / 2;
-			gfx->setCursor(textX, textY);
-			gfx->print(dots);
-		}
+		// 	String dots = "Loading";
+		// 	for (int j = 0; j <= i; j++) {
+		// 		dots += ".";
+		// 	}
+		// 	gfx->getTextBounds(dots, 0, 0, &x1, &y1, &w, &h);
+		// 	textX = (SCREEN_WIDTH - w) / 2;
+		// 	gfx->setCursor(textX, textY);
+		// 	gfx->print(dots);
+		// }
 
-		delay(800);
-
-		// Clear screen for dashboard
-		gfx->fillScreen(BLACK);
+		// COMMENTED OUT: Long delay was blocking serial communication
+		// delay(800);
 		Serial.println("Loading screen completed");
 	}
 public:

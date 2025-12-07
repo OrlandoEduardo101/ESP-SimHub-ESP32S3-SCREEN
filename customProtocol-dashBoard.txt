@@ -18,5 +18,5 @@ isnull([GameRawData.Graphics.TCCut]) + ';' +
 [TCLevel] + '  ' + [GameRawData.Graphics.TCCut] + ';' +
 abs(format([BrakeBias], '00.0')) + ';' +
 format([Brake], '0') + ';' +
-[LapInvalidated] + ';
+[LapInvalidated]
 
