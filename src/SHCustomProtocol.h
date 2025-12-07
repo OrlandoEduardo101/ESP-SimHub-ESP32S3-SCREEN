@@ -75,7 +75,7 @@ static const int HALF_CELL_WIDTH = CELL_WIDTH / 2;
 static const int CELL_HEIGHT = SCREEN_HEIGHT / ROWS;
 static const int HALF_CELL_HEIGHT = CELL_HEIGHT / 2;
 static const int COL[] = {0, CELL_WIDTH, CELL_WIDTH * 2, CELL_WIDTH * 3, CELL_WIDTH * 4, CELL_WIDTH * 6, CELL_WIDTH * 7};
-static const int ROW[] = {0, CELL_HEIGHT, CELL_HEIGHT * 2, CELL_HEIGHT * 3, CELL_HEIGHT * 4, CELL_HEIGHT * 6, CELL_HEIGHT * 7};
+static const int ROW[] = {0, 64, 132, 200, 256};
 
 #include <GFXHelpers.h>
 
