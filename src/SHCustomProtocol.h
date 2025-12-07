@@ -135,6 +135,15 @@ private:
 	String brakeBias = "0";
 	String brake = "0";
 	String lapInvalidated = "False";
+	
+	// Alert/Flag variables
+	String currentFlag = "None";
+	String prevFlag = "None";
+	String currentPenalties = "0";
+	String prevPenalties = "0";
+	String cutTrackWarnings = "0";
+	unsigned long alertStartTime = 0;
+	static const unsigned long ALERT_DURATION_MS = 3000;  // Show alert for 3 seconds
 
 	int cellTitleHeight = 0;
 	bool hasReceivedData = false;
@@ -520,6 +529,9 @@ public:
 		brakeBias  = FlowSerialReadStringUntil(';');
 		brake  = FlowSerialReadStringUntil(';');
 		lapInvalidated  = FlowSerialReadStringUntil(';');
+		currentFlag  = FlowSerialReadStringUntil(';');
+		currentPenalties  = FlowSerialReadStringUntil(';');
+		cutTrackWarnings  = FlowSerialReadStringUntil(';');
 
 		const String rest = FlowSerialReadStringUntil('\n');
 	}
@@ -589,6 +601,9 @@ public:
 				drawLeaderboardPageContent();
 				break;
 		}
+		
+		// Draw alerts (flags, penalties, etc.) on top of everything
+		drawAlert();
 		
 		// Draw page indicator at bottom
 		drawPageIndicator();
@@ -1168,6 +1183,82 @@ public:
 			prevColor[id] = color;
 		}
 
+	}
+	
+	// Draw alerts/flags in the center of the screen
+	void drawAlert() {
+		if (!canUseDisplay()) return;
+		
+		// Check if we should show an alert
+		bool shouldShowAlert = false;
+		String alertText = "";
+		uint16_t bgColor = BLACK;
+		uint16_t textColor = WHITE;
+		
+		// Check for flag changes
+		if (currentFlag != prevFlag && currentFlag != "None") {
+			shouldShowAlert = true;
+			alertStartTime = millis();
+			prevFlag = currentFlag;
+			
+			if (currentFlag == "Blue") {
+				alertText = "BLUE FLAG";
+				bgColor = BLUE;
+				textColor = WHITE;
+			} else if (currentFlag == "Yellow") {
+				alertText = "YELLOW FLAG";
+				bgColor = YELLOW;
+				textColor = BLACK;
+			} else if (currentFlag == "Red") {
+				alertText = "RED FLAG";
+				bgColor = RED;
+				textColor = WHITE;
+			} else if (currentFlag == "White") {
+				alertText = "WHITE FLAG";
+				bgColor = WHITE;
+				textColor = BLACK;
+			} else if (currentFlag == "Black") {
+				alertText = "BLACK FLAG";
+				bgColor = RGB565(20, 20, 20);
+				textColor = WHITE;
+			}
+		}
+		
+		// Check for penalty changes
+		if (currentPenalties != prevPenalties && currentPenalties.toInt() > 0) {
+			shouldShowAlert = true;
+			alertStartTime = millis();
+			prevPenalties = currentPenalties;
+			alertText = "PENALTY: " + currentPenalties;
+			bgColor = RGB565(200, 0, 0);  // Dark red
+			textColor = WHITE;
+		}
+		
+		// Check if alert should still be displayed (3 second duration)
+		if (shouldShowAlert || (millis() - alertStartTime) < ALERT_DURATION_MS) {
+			if (alertText.length() > 0) {
+				// Draw semi-transparent dark overlay
+				int alertWidth = 200;
+				int alertHeight = 100;
+				int alertX = (SCREEN_WIDTH - alertWidth) / 2;
+				int alertY = (SCREEN_HEIGHT - alertHeight) / 2;
+				
+				// Draw background box
+				gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgColor);
+				gfx->drawRect(alertX, alertY, alertWidth, alertHeight, WHITE);
+				
+				// Draw text
+				gfx->setTextColor(textColor);
+				gfx->setTextSize(3);
+				int16_t x1, y1;
+				uint16_t w, h;
+				gfx->getTextBounds(alertText, 0, 0, &x1, &y1, &w, &h);
+				int textX = alertX + (alertWidth - w) / 2;
+				int textY = alertY + (alertHeight - h) / 2;
+				gfx->setCursor(textX, textY);
+				gfx->print(alertText);
+			}
+		}
 	}
 };
 #endif
