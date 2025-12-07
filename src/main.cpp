@@ -98,26 +98,59 @@ void setup(void)
   
 	// Initialize Serial FIRST with explicit begin()
 	Serial.begin(115200);
+	Serial.setDebugOutput(true);
   
 	// Wait for USB CDC to enumerate - critical for USB CDC mode
 	// This blocks until the host recognizes the device
 	unsigned long start = millis();
-	while (!Serial && (millis() - start) < 3000) {
+	while (!Serial && (millis() - start) < 5000) {
 		delay(10);
 	}
   
 	// Additional delay to stabilize
+	delay(1000);
+	
+	// FLUSH any garbage
+	while (Serial.available()) Serial.read();
+	Serial.flush();
 	delay(200);
+	
+	// Print immediate boot message
+	Serial.print("\n\n========================================\n");
+	Serial.print(">>> ESP32-S3 BOOT SEQUENCE START\n");
+	Serial.print(">>> Millis: ");
+	Serial.println(millis());
+	Serial.print(">>> Setup() starting...\n");
+	Serial.flush();
+	delay(100);
   
 	bootCount++;
+	Serial.print(">>> bootCount = ");
+	Serial.println(bootCount);
+	Serial.flush();
+	delay(100);
+	
 	screenLog("BOOT: start #" + String(bootCount));
 	screenLog(String("Reset:") + resetReasonStr(esp_reset_reason()));
 	screenLog("Heap=" + String(ESP.getFreeHeap()) + " PSRAM=" + String(ESP.getFreePsram()));
 
 	// Bring up display and protocol so we can show logs on screen
+	Serial.println(">>> About to call shCustomProtocol.setup()");
+	Serial.flush();
+	delay(100);
+	
 	shCustomProtocol.setup();
+	
+	Serial.println(">>> shCustomProtocol.setup() completed");
+	Serial.flush();
+	delay(100);
+	
 	arqserial.setIdleFunction(idle);
 	screenLog("Display init OK");
+	
+	Serial.println(">>> Setup complete!");
+	Serial.println("========================================\n");
+	Serial.flush();
 }
 
 void loop()

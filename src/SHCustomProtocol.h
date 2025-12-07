@@ -5,6 +5,11 @@
 #include <Arduino_GFX_Library.h>
 #include <map>
 #include "logo_image.h"  // Logo image array
+#include <Wire.h>
+#include <Wire.h>
+
+// Forward declaration for screenLog
+extern void screenLog(const String &msg);
 
 // WT32-SC01 Plus - ST7796 via 8-bit MCU (8080) parallel interface (320x480)
 // IMPORTANT: WT32-SC01 Plus uses 8-bit parallel interface, NOT SPI!
@@ -35,6 +40,26 @@
 // Creating them in setup() instead of globally prevents "no free i80 bus slot" error
 Arduino_DataBus *bus = nullptr;
 Arduino_ST7796 *gfx = nullptr;
+
+// Touch screen configuration for WT32-SC01 Plus (FT6336U capacitive touch)
+// According to: https://github.com/Cesarbautista10/WT32-SC01-Plus-ESP32
+#define TOUCH_SDA 6   // I2C_SDA - Touch data
+#define TOUCH_SCL 5   // I2C_SCL - Touch clock
+#define TOUCH_INT 7   // INT - Touch interrupt (optional)
+#define TOUCH_RST 4   // RST - Touch reset (shared with LCD reset)
+#define TOUCH_ADDRESS 0x38  // FT6336U I2C address
+#define TOUCH_WIDTH SCREEN_WIDTH
+#define TOUCH_HEIGHT SCREEN_HEIGHT
+
+// Simple touch point structure
+struct TouchPoint {
+	int16_t x;
+	int16_t y;
+	bool touched;
+};
+
+bool touchInitialized = false;
+
 #else
 // RGB Panel displays (480x272 or 800x480) - not used for WT32-SC01 Plus
 #define TFT_BL 2 // backlight pin
@@ -72,7 +97,8 @@ static const int ROWS = 5;
 static const int COLS = 5;
 static const int CELL_WIDTH = SCREEN_WIDTH / COLS;
 static const int HALF_CELL_WIDTH = CELL_WIDTH / 2;
-static const int CELL_HEIGHT = SCREEN_HEIGHT / ROWS;
+static const int CONTENT_HEIGHT = SCREEN_HEIGHT - 40;  // Reserve 40px at bottom for padding + indicator
+static const int CELL_HEIGHT = CONTENT_HEIGHT / ROWS;
 static const int HALF_CELL_HEIGHT = CELL_HEIGHT / 2;
 static const int COL[] = {0, CELL_WIDTH, CELL_WIDTH * 2, CELL_WIDTH * 3, CELL_WIDTH * 4, CELL_WIDTH * 6, CELL_WIDTH * 7};
 static const int ROW[] = {0, 64, 132, 200, 256};
@@ -113,10 +139,78 @@ private:
 	int cellTitleHeight = 0;
 	bool hasReceivedData = false;
 	bool displayEnabled = true;  // Display enabled for dashboard
+	bool loadingScreenShown = false;  // Track if loading screen has been shown
+	bool touchInitAttempted = false;  // Track if we've already tried to init touch
+	
+	// Multi-page dashboard variables
+	enum DashboardPage { 
+		PAGE_RACE = 0, 
+		PAGE_TIMING = 1, 
+		PAGE_TELEMETRY = 2,
+		PAGE_RELATIVE = 3,      // NEW: Relative/Head-to-head
+		PAGE_LAPS = 4,           // NEW: Laps/Sectors analysis
+		PAGE_LEADERBOARD = 5     // NEW: Leaderboard
+	};
+	DashboardPage currentPage = PAGE_RACE;
+	DashboardPage lastPage = PAGE_RACE;  // Track previous page to detect page changes
+	unsigned long lastTouchTime = 0;
+	static const unsigned long TOUCH_DEBOUNCE_MS = 500;  // Debounce time between page changes
 
 	// Helper function to safely use display
 	bool canUseDisplay() {
 		return displayEnabled && gfx != nullptr;
+	}
+	
+	// Reset draw cache when changing pages
+	void resetDrawCache() {
+		prev_gear = "";  // Force gear redraw
+		prev_rpmPercent = -1;  // Force RPM redraw
+		// Clear prevData map to force all cells to redraw
+		prevData.clear();
+		prevColor.clear();
+	}
+	
+	// Navigate to next page
+	void nextPage() {
+		currentPage = (DashboardPage)((currentPage + 1) % 6);
+		gfx->fillScreen(BLACK);
+		resetDrawCache();
+	}
+	
+	// Navigate to previous page
+	void prevPage() {
+		currentPage = (DashboardPage)((currentPage - 1 + 6) % 6);
+		gfx->fillScreen(BLACK);
+		resetDrawCache();
+	}
+
+	// Read touch point from FT6336U
+	TouchPoint readTouch() {
+		TouchPoint point = {0, 0, false};
+		if (!touchInitialized) return point;
+		
+		// Read FT6336U touch data from registers
+		Wire.beginTransmission(TOUCH_ADDRESS);
+		Wire.write(0x02);  // TD_STATUS register
+		Wire.endTransmission();
+		
+		Wire.requestFrom(TOUCH_ADDRESS, 5);  // Read 5 bytes: status + X high + X low + Y high + Y low
+		if (Wire.available() >= 5) {
+			uint8_t status = Wire.read();     // TD_STATUS (bit 0 = touch detected)
+			uint8_t x_high = Wire.read();     // Touch X High byte
+			uint8_t x_low = Wire.read();      // Touch X Low byte
+			uint8_t y_high = Wire.read();     // Touch Y High byte
+			uint8_t y_low = Wire.read();      // Touch Y Low byte
+			
+			// Only process if touch is detected (bit 0 set in status)
+			if (status & 0x01) {
+				// Extract coordinates - FT6336U stores X as 12-bit value
+				point.x = ((x_high & 0x0F) << 8) | x_low;
+				point.y = ((y_high & 0x0F) << 8) | y_low;
+				point.touched = true;
+			}
+		}
+		return point;
 	}
 
 	// Show loading screen with real PNG logo image
@@ -187,11 +281,15 @@ private:
 		// COMMENTED OUT: Long delay was blocking serial communication
 		// delay(800);
 		Serial.println("Loading screen completed");
+		loadingScreenShown = true;
 	}
 public:
 	void setup() {
 		// Initialize display for dashboard
 		displayEnabled = true;
+
+		// NOTE: Touch initialization is deferred to loop() after display is ready
+		// This is because screenLog() needs gfx to be fully initialized
 
 		if (displayEnabled) {
 			// Create bus and display objects here to avoid "no free i80 bus slot" error
@@ -278,6 +376,116 @@ public:
 				displayEnabled = false;
 			}
 		}
+
+		
+	}
+
+	void initializeTouch() {
+		Serial.print("\n");
+		Serial.println("========== TOUCH INITIALIZATION START ==========");
+		Serial.print("Millis: ");
+		Serial.println(millis());
+		Serial.flush();
+		delay(100);
+		
+		screenLog("TOUCH: Initializing...");
+		
+		// Initialize I2C for FT6336U touch controller
+		Serial.println("Step 1: Setting up I2C...");
+		Serial.flush();
+		delay(50);
+		
+		Wire.begin(TOUCH_SDA, TOUCH_SCL);
+		
+		Serial.print("Step 2: I2C begin() called with SDA=");
+		Serial.print(TOUCH_SDA);
+		Serial.print(" SCL=");
+		Serial.println(TOUCH_SCL);
+		Serial.flush();
+		delay(50);
+		
+		screenLog("TOUCH: I2C begin SDA=" + String(TOUCH_SDA) + " SCL=" + String(TOUCH_SCL));
+		
+		Wire.setClock(400000);
+		Serial.println("Step 3: I2C clock set to 400kHz");
+		Serial.flush();
+		delay(200);
+		
+		screenLog("TOUCH: I2C 400kHz configured");
+		
+		// Scan for FT6336U at address 0x38
+		Serial.print("Step 4: Scanning I2C for FT6336U at address 0x");
+		Serial.println(TOUCH_ADDRESS, HEX);
+		Serial.flush();
+		delay(50);
+		
+		screenLog("TOUCH: Scanning for FT6336U at 0x38...");
+		
+		Wire.beginTransmission(TOUCH_ADDRESS);
+		uint8_t error = Wire.endTransmission();
+		
+		Serial.print("Step 5: I2C transmission result: ");
+		Serial.println(error);
+		Serial.flush();
+		delay(50);
+		
+		if (error == 0) {
+			touchInitialized = true;
+			Serial.println("SUCCESS: FT6336U FOUND at 0x38!");
+			Serial.flush();
+			delay(100);
+			
+			screenLog("TOUCH: SUCCESS - FT6336U found!");
+		} else {
+			Serial.println("ERROR: FT6336U NOT FOUND at address 0x38");
+			Serial.print("I2C Error code: ");
+			Serial.println(error);
+			Serial.flush();
+			delay(100);
+			
+			screenLog("TOUCH: ERROR - not found at 0x38 (code " + String(error) + ")");
+			
+			// Try to scan all I2C addresses to find what's there
+			Serial.println("Scanning ALL I2C addresses 0x01-0x7E...");
+			Serial.flush();
+			delay(50);
+			
+			screenLog("TOUCH: Scanning all addresses...");
+			
+			bool found_any = false;
+			String found_devices = "";
+			for (uint8_t i = 1; i < 127; i++) {
+				Wire.beginTransmission(i);
+				if (Wire.endTransmission() == 0) {
+					Serial.print("  Found device at 0x");
+					if (i < 0x10) Serial.print("0");
+					Serial.println(i, HEX);
+					Serial.flush();
+					
+					if (found_devices.length() > 0) found_devices += ", ";
+					found_devices += "0x";
+					if (i < 0x10) found_devices += "0";
+					found_devices += String(i, HEX);
+					
+					found_any = true;
+				}
+			}
+			
+			if (found_any) {
+				screenLog("TOUCH: Found devices at: " + found_devices);
+			} else {
+				screenLog("TOUCH: No I2C devices found!");
+			}
+			Serial.flush();
+			delay(100);
+			
+			touchInitialized = false;
+		}
+		Serial.println("========== TOUCH INITIALIZATION END ==========\n");
+		Serial.flush();
+		delay(100);
+		
+		screenLog("TOUCH: Init complete");
 	}
 
 	// Called when new data is coming from computer
@@ -319,9 +527,90 @@ public:
 	// Called once per arduino loop, timing can't be predicted,
 	// but it's called between each command sent to the arduino
 	void loop() {
+		// Initialize touch right after loading screen is shown (before SimHub data arrives)
+		if (!touchInitAttempted && loadingScreenShown) {
+			touchInitAttempted = true;
+			initializeTouch();
+		}
+		
+		// Check for touch input to change pages
+		if (touchInitialized && hasReceivedData) {
+			TouchPoint touch = readTouch();
+			if (touch.touched && (millis() - lastTouchTime) > TOUCH_DEBOUNCE_MS) {
+				lastTouchTime = millis();
+				
+				// Left half = previous page, Right half = next page
+				if (touch.x < SCREEN_WIDTH / 2) {
+					// Previous page (left swipe)
+					currentPage = (DashboardPage)((currentPage - 1 + 6) % 6);
+					gfx->fillScreen(BLACK);  // Clear screen for new page
+				} else {
+					// Next page (right swipe)
+					currentPage = (DashboardPage)((currentPage + 1) % 6);
+					gfx->fillScreen(BLACK);  // Clear screen for new page
+				}
+				
+				// Reset draw cache when page changes to force complete redraw
+				if (currentPage != lastPage) {
+					resetDrawCache();
+					lastPage = currentPage;
+				}
+			}
+		}
+		
+		// Detect page changes (for cases other than touch)
+		if (currentPage != lastPage) {
+			resetDrawCache();
+			lastPage = currentPage;
+		}
+		
 		if (!hasReceivedData) {
 			return;
 		}
+		
+		// Draw page-specific content
+		switch (currentPage) {
+			case PAGE_RACE:
+				drawRacePageContent();
+				break;
+			case PAGE_TIMING:
+				drawTimingPageContent();
+				break;
+			case PAGE_TELEMETRY:
+				drawTelemetryPageContent();
+				break;
+			case PAGE_RELATIVE:
+				drawRelativePageContent();
+				break;
+			case PAGE_LAPS:
+				drawLapsPageContent();
+				break;
+			case PAGE_LEADERBOARD:
+				drawLeaderboardPageContent();
+				break;
+		}
+		
+		// Draw page indicator at bottom
+		drawPageIndicator();
+	}
+	
+	void drawPageIndicator() {
+		// Draw small page indicator dots at bottom center (6 pages)
+		// Positioned in dedicated padding area at bottom
+		int dotRadius = 2;
+		int dotSpacing = 8;
+		int totalWidth = (6 - 1) * dotSpacing + (dotRadius * 2);
+		int startX = (SCREEN_WIDTH - totalWidth) / 2;  // Center horizontally
+		int startY = SCREEN_HEIGHT + 41;  // 8px from bottom margin (colado na borda)
+		
+		for (int i = 0; i < 6; i++) {
+			uint16_t color = (i == currentPage) ? WHITE : RGB565(100, 100, 100);
+			gfx->fillCircle(startX + (i * dotSpacing), startY, dotRadius, color);
+		}
+	}
+	
+	void drawRacePageContent() {
+		// Original dashboard content
 		drawRpmMeter(0, 0, SCREEN_WIDTH, CELL_HEIGHT);
 		// this takes 2 cells in height, hence CELL_HEIGHT is the half point
 		drawGear(COL[2] + HALF_CELL_WIDTH, ROW[1] + CELL_HEIGHT);
@@ -353,6 +642,397 @@ public:
 		drawCell(COL[4], ROW[3], tyrePressureFrontRight, "tyrePressureFrontRight", "FR", "center", CYAN);
 		drawCell(COL[3], ROW[4], tyrePressureRearLeft, "tyrePressureRearLeft", "RL", "center", CYAN);
 		drawCell(COL[4], ROW[4], tyrePressureRearRight, "tyrePressureRearRight", "RR", "center", CYAN);
+	}
+	
+	void drawTimingPageContent() {
+		// PAGE 2: Timing/Lap Analysis - with visual layout (full width)
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 20, 60));  // Header background
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(3);
+		gfx->setCursor(10, 10);
+		gfx->print("TIMING");
+		
+		// Best lap box
+		gfx->drawRect(5, 55, SCREEN_WIDTH - 10, 70, YELLOW);
+		gfx->fillRect(5, 55, SCREEN_WIDTH - 10, 25, YELLOW);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 62);
+		gfx->print("BEST LAP");
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(2);
+		gfx->setCursor(20, 82);
+		gfx->print(bestLapTime);
+		
+		// Last lap box
+		gfx->drawRect(5, 135, SCREEN_WIDTH - 10, 70, CYAN);
+		gfx->fillRect(5, 135, SCREEN_WIDTH - 10, 25, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 142);
+		gfx->print("LAST LAP");
+		gfx->setTextColor(CYAN);
+		gfx->setTextSize(2);
+		gfx->setCursor(20, 162);
+		gfx->print(lastLapTime);
+		
+		// Current lap box
+		gfx->drawRect(5, 215, SCREEN_WIDTH - 10, 55, GREEN);
+		gfx->fillRect(5, 215, SCREEN_WIDTH - 10, 25, GREEN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 222);
+		gfx->print("CURRENT LAP");
+		gfx->setTextColor(GREEN);
+		gfx->setTextSize(2);
+		gfx->setCursor(20, 242);
+		gfx->print(currentLapTime);
+		
+		// Delta indicator on the right
+		gfx->drawRect(SCREEN_WIDTH - 75, 55, 70, 215, WHITE);
+		gfx->fillRect(SCREEN_WIDTH - 75, 55, 70, 25, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(SCREEN_WIDTH - 70, 62);
+		gfx->print("DELTA");
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(1);
+		gfx->setCursor(SCREEN_WIDTH - 70, 90);
+		gfx->print(sessionBestLiveDeltaSeconds);
+	}
+	
+	void drawTelemetryPageContent() {
+		// PAGE 3: Telemetry/Vehicle Status - with visual boxes (full width)
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 20));  // Header background
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(3);
+		gfx->setCursor(10, 10);
+		gfx->print("TELEMETRY");
+		
+		// Speed - Large display (left side)
+		int speedBoxWidth = (SCREEN_WIDTH - 20) / 2;
+		gfx->drawRect(5, 55, speedBoxWidth, 80, YELLOW);
+		gfx->fillRect(5, 55, speedBoxWidth, 25, YELLOW);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 62);
+		gfx->print("SPEED");
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(3);
+		gfx->setCursor(20, 75);
+		gfx->print(speed);
+		
+		// TC/ABS indicators side by side (right side)
+		int tcBoxWidth = (SCREEN_WIDTH - 25) / 2;
+		// TC Box
+		gfx->drawRect(5 + speedBoxWidth + 5, 55, tcBoxWidth, 35, ORANGE);
+		gfx->fillRect(5 + speedBoxWidth + 5, 55, tcBoxWidth, 20, ORANGE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10 + speedBoxWidth + 5, 62);
+		gfx->print("TC");
+		gfx->setTextColor(ORANGE);
+		gfx->setTextSize(2);
+		gfx->setCursor(20 + speedBoxWidth + 5, 70);
+		gfx->print(tcLevel);
+		
+		// ABS Box
+		gfx->drawRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 35, BLUE);
+		gfx->fillRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 20, BLUE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10 + speedBoxWidth + 5, 102);
+		gfx->print("ABS");
+		gfx->setTextColor(BLUE);
+		gfx->setTextSize(2);
+		gfx->setCursor(20 + speedBoxWidth + 5, 110);
+		gfx->print(absLevel);
+		
+		// Brake Box (full width)
+		gfx->drawRect(5, 145, SCREEN_WIDTH - 10, 50, RED);
+		gfx->fillRect(5, 145, SCREEN_WIDTH - 10, 25, RED);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 152);
+		gfx->print("BRAKE PRESSURE");
+		gfx->setTextColor(RED);
+		gfx->setTextSize(2);
+		gfx->setCursor(30, 165);
+		gfx->print(brake);
+		gfx->print("%");
+		
+		// Tyre pressures grid (full width, split in 2)
+		int tyreBoxWidth = (SCREEN_WIDTH - 15) / 2;
+		gfx->drawRect(5, 205, tyreBoxWidth, 65, CYAN);
+		gfx->fillRect(5, 205, tyreBoxWidth, 20, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 212);
+		gfx->print("TYRE FL/RL");
+		gfx->setTextColor(CYAN);
+		gfx->setCursor(10, 230);
+		gfx->print("FL: ");
+		gfx->println(tyrePressureFrontLeft);
+		gfx->setCursor(10, 245);
+		gfx->print("RL: ");
+		gfx->println(tyrePressureRearLeft);
+		
+		gfx->drawRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 65, CYAN);
+		gfx->fillRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 20, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10 + tyreBoxWidth + 5, 212);
+		gfx->print("TYRE FR/RR");
+		gfx->setTextColor(CYAN);
+		gfx->setCursor(10 + tyreBoxWidth + 5, 230);
+		gfx->print("FR: ");
+		gfx->println(tyrePressureFrontRight);
+		gfx->setCursor(10 + tyreBoxWidth + 5, 245);
+		gfx->print("RR: ");
+		gfx->println(tyrePressureRearRight);
+	}
+	
+	void drawRelativePageContent() {
+		// PAGE 4: Relative/Head-to-Head Comparison (full width)
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 12);
+		gfx->print("HEAD TO HEAD");
+		
+		// Driver ahead - Top box
+		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 80, MAGENTA);
+		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, MAGENTA);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 58);
+		gfx->print("DRIVER AHEAD");
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 80);
+		gfx->print("Position: 1st");
+		gfx->setCursor(10, 95);
+		gfx->print("Gap: +0.123s");
+		gfx->setCursor(10, 110);
+		gfx->print("Last: 01:35.74");
+		
+		// YOU - Middle box (highlighted)
+		gfx->drawRect(5, 140, SCREEN_WIDTH - 10, 80, CYAN);
+		gfx->fillRect(5, 140, SCREEN_WIDTH - 10, 25, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 145);
+		gfx->print(">>> YOU <<<");
+		gfx->setTextColor(CYAN);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 175);
+		gfx->print("Position: 2nd");
+		gfx->setCursor(10, 190);
+		gfx->print("Last: " + lastLapTime);
+		gfx->setCursor(10, 205);
+		gfx->print("Current: " + currentLapTime);
+		
+		// Driver behind - Bottom box
+		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, ORANGE);
+		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, ORANGE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 237);
+		gfx->print("DRIVER BEHIND");
+		gfx->setTextColor(ORANGE);
+		gfx->setCursor(10, 253);
+		gfx->print("Position: 3rd (-0.500s)");
+	}
+	
+	void drawLapsPageContent() {
+		// PAGE 5: Laps/Sectors Analysis - with nice layout
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(40, 20, 60));  // Header background
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 12);
+		gfx->print("LAPS/SECTORS");
+		
+		// Lap times summary - Three boxes spanning full width
+		int boxWidth = (SCREEN_WIDTH - 20) / 3;  // 3 boxes with 5px spacing
+		int boxHeight = 65;
+		
+		// Best lap
+		gfx->drawRect(5, 50, boxWidth, boxHeight, YELLOW);
+		gfx->fillRect(5, 50, boxWidth, 20, YELLOW);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(8, 57);
+		gfx->print("BEST");
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 72);
+		gfx->print(bestLapTime);
+		
+		// Last lap
+		gfx->drawRect(5 + boxWidth + 5, 50, boxWidth, boxHeight, CYAN);
+		gfx->fillRect(5 + boxWidth + 5, 50, boxWidth, 20, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(8 + boxWidth + 5, 57);
+		gfx->print("LAST");
+		gfx->setTextColor(CYAN);
+		gfx->setTextSize(1);
+		gfx->setCursor(10 + boxWidth + 5, 72);
+		gfx->print(lastLapTime);
+		
+		// Current lap
+		gfx->drawRect(5 + (boxWidth + 5) * 2, 50, boxWidth, boxHeight, GREEN);
+		gfx->fillRect(5 + (boxWidth + 5) * 2, 50, boxWidth, 20, GREEN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(8 + (boxWidth + 5) * 2, 57);
+		gfx->print("NOW");
+		gfx->setTextColor(GREEN);
+		gfx->setTextSize(1);
+		gfx->setCursor(10 + (boxWidth + 5) * 2, 72);
+		gfx->print(currentLapTime);
+		
+		// Sector times - detailed box (full width)
+		gfx->drawRect(5, 125, SCREEN_WIDTH - 10, 120, WHITE);
+		gfx->fillRect(5, 125, SCREEN_WIDTH - 10, 25, WHITE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 132);
+		gfx->print("SECTOR TIMES");
+		
+		// Sector 1
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(15, 160);
+		gfx->print("S1");
+		gfx->setCursor(45, 160);
+		gfx->print(": 00:35.12");
+		gfx->setTextColor(GREEN);
+		gfx->setCursor(220, 160);
+		gfx->print("[BEST]");
+		
+		// Sector 2
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(15, 180);
+		gfx->print("S2");
+		gfx->setCursor(45, 180);
+		gfx->print(": 00:35.45");
+		gfx->setTextColor(YELLOW);
+		gfx->setCursor(220, 180);
+		gfx->print("[+0.33s]");
+		
+		// Sector 3
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(15, 200);
+		gfx->print("S3");
+		gfx->setCursor(45, 200);
+		gfx->print(": 00:25.17");
+		gfx->setTextColor(CYAN);
+		gfx->setCursor(220, 200);
+		gfx->print("[+0.05s]");
+		
+		// Delta indicator (full width)
+		gfx->drawRect(5, 255, SCREEN_WIDTH - 10, 20, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		gfx->fillRect(5, 255, SCREEN_WIDTH - 10, 20, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(120, 262);
+		gfx->print("Delta: ");
+		gfx->print(sessionBestLiveDeltaSeconds);
+	}
+	
+	void drawLeaderboardPageContent() {
+		// PAGE 6: Leaderboard - with nice styling
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 60, 20));  // Header background
+		gfx->setTextColor(GREEN);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 12);
+		gfx->print("LEADERBOARD");
+		
+		// Leaderboard box (full width)
+		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 215, WHITE);
+		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 57);
+		gfx->print("POS  DRIVER          TIME       GAP");
+		
+		// Draw separator line
+		gfx->drawLine(5, 75, SCREEN_WIDTH - 5, 75, RGB565(100, 100, 100));
+		
+		// Leaderboard entries - small font
+		gfx->setTextSize(1);
+		int yPos = 85;
+		
+		// 1st place (leading driver)
+		gfx->setTextColor(YELLOW);
+		gfx->setCursor(10, yPos);
+		gfx->print("1");
+		gfx->setCursor(30, yPos);
+		gfx->print("Driver A");
+		gfx->setCursor(130, yPos);
+		gfx->print("01:34.23");
+		gfx->setCursor(200, yPos);
+		gfx->print("--:--");
+		
+		yPos += 18;
+		
+		// 2nd place
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(10, yPos);
+		gfx->print("2");
+		gfx->setCursor(30, yPos);
+		gfx->print("Driver B");
+		gfx->setCursor(130, yPos);
+		gfx->print("01:34.89");
+		gfx->setCursor(200, yPos);
+		gfx->print("+0.66s");
+		
+		yPos += 18;
+		
+		// 3rd place (YOU)
+		gfx->setTextColor(CYAN);
+		gfx->setCursor(10, yPos);
+		gfx->print("3");
+		gfx->setCursor(30, yPos);
+		gfx->print(">>> YOU <<<");
+		gfx->setCursor(130, yPos);
+		gfx->print("01:35.12");
+		gfx->setCursor(200, yPos);
+		gfx->print("+0.89s");
+		
+		yPos += 18;
+		
+		// 4th place
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(10, yPos);
+		gfx->print("4");
+		gfx->setCursor(30, yPos);
+		gfx->print("Driver C");
+		gfx->setCursor(130, yPos);
+		gfx->print("01:35.67");
+		gfx->setCursor(200, yPos);
+		gfx->print("+1.44s");
+		
+		yPos += 18;
+		
+		// 5th place
+		gfx->setTextColor(WHITE);
+		gfx->setCursor(10, yPos);
+		gfx->print("5");
+		gfx->setCursor(30, yPos);
+		gfx->print("Driver D");
+		gfx->setCursor(130, yPos);
+		gfx->print("01:36.01");
+		gfx->setCursor(200, yPos);
+		gfx->print("+1.78s");
+		
+		// Summary bar at bottom
+		gfx->drawRect(5, 265, 250, 20, CYAN);
+		gfx->fillRect(5, 265, 250, 20, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 270);
+		gfx->print("Your Gap to Leader: +0.89s");
 	}
 
 	void idle() {
