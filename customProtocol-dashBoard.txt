@@ -1,25 +1,229 @@
+/* ==========================================
+   BLOCO 1: TELEMETRIA BÁSICA (Índices 0-4)
+   ========================================== */
+format([DataCorePlugin.GameData.NewData.SpeedKmh],'0') + ';' +      /* [0] Velocidade (Km/h) */
+isnull([DataCorePlugin.GameData.NewData.Gear],'N') + ';' +          /* [1] Marcha (N = Neutro) */
+format([CarSettings_CurrentDisplayedRPMPercent],'0') + ';' +        /* [2] RPM % (0-100) p/ Barra LED */
+format([CarSettings_RPMRedLineSetting],'0') + ';' +                 /* [3] Config Redline do carro */
+format([DataCorePlugin.GameData.NewData.Rpms],'0') + ';' +          /* [4] RPM Atual (Valor exato) */
+
+/* ==========================================
+   BLOCO 2: CRONOMETRAGEM (Índices 5-10)
+   ========================================== */
+format([CurrentLapTime], 'mm\\:ss\\.fff') + ';' +                   /* [5] Tempo Volta Atual */
+format([LastLapTime], 'mm\\:ss\\.fff') + ';' +                      /* [6] Tempo Última Volta */
+format([BestLapTime], 'mm\\:ss\\.fff') + ';' +                      /* [7] Melhor Volta */
+format([PersistantTrackerPlugin.SessionBestLiveDeltaSeconds],'0.000') + ';' + /* [8] Delta (Tempo) */
+format([PersistantTrackerPlugin.SessionBestLiveDeltaProgressSeconds],'0.00') + ';' + /* [9] Delta (Barra) */
+[LapInvalidated] + ';' +                                            /* [10] Volta Inválida (True/False) */
+
+/* ==========================================
+   BLOCO 3: FÍSICA E PNEUS (Índices 11-24)
+   ========================================== */
+/* Pressão (PSI/Bar conforme jogo) */
+format([TyrePressureFrontLeft], '00.0') + ';' +                     /* [11] Pressão FE */
+format([TyrePressureFrontRight], '00.0') + ';' +                    /* [12] Pressão FD */
+format([TyrePressureRearLeft], '00.0') + ';' +                      /* [13] Pressão TE */
+format([TyrePressureRearRight], '00.0') + ';' +                     /* [14] Pressão TD */
+/* Temperatura Pneus (Cº) */
+format([TyreTemperatureFrontLeft], '0') + ';' +                     /* [15] Temp Pneu FE */
+format([TyreTemperatureFrontRight], '0') + ';' +                    /* [16] Temp Pneu FD */
+format([TyreTemperatureRearLeft], '0') + ';' +                      /* [17] Temp Pneu TE */
+format([TyreTemperatureRearRight], '0') + ';' +                     /* [18] Temp Pneu TD */
+/* Temperatura Freios (Cº) */
+format([BrakeTemperatureFrontLeft], '0') + ';' +                    /* [19] Temp Freio FE */
+format([BrakeTemperatureFrontRight], '0') + ';' +                   /* [20] Temp Freio FD */
+format([BrakeTemperatureRearLeft], '0') + ';' +                     /* [21] Temp Freio TE */
+format([BrakeTemperatureRearRight], '0') + ';' +                    /* [22] Temp Freio TD */
+/* Motor */
+format([OilTemperature], '0') + ';' +                               /* [23] Temp Óleo */
+format([WaterTemperature], '0') + ';' +                             /* [24] Temp Água */
+
+/* ==========================================
+   BLOCO 4: ELETRÔNICA (Índices 25-31)
+   ========================================== */
+isnull([TCLevel], 0) + ';' +                                        /* [25] Nível TC */
+isnull([TCActive], 0) + ';' +                                       /* [26] TC Ativo (0/1) */
+isnull([ABSLevel], 0) + ';' +                                       /* [27] Nível ABS */
+isnull([ABSActive], 0) + ';' +                                      /* [28] ABS Ativo (0/1) */
+isnull([GameRawData.Graphics.TCCut], 0) + ';' +                     /* [29] Corte Motor TC */
+abs(format([BrakeBias], '00.0')) + ';' +                            /* [30] Brake Bias */
+format([Brake], '0') + ';' +                                        /* [31] Pedal Freio (0-100) */
+
+/* ==========================================
+   BLOCO 5: ESTRATÉGIA (Índices 32-41)
+   ========================================== */
+[Position] + ';' +                                                  /* [32] Posição P1, P2... */
+[OpponentsCount] + ';' +                                            /* [33] Total Pilotos */
+isnull(format([PersistantTrackerPlugin.DriverAhead_00_Gap], '0.0'), '--') + ';' + /* [34] Gap Frente */
+isnull(format([PersistantTrackerPlugin.DriverBehind_00_Gap], '0.0'), '--') + ';' + /* [35] Gap Atrás */
+format([DataCorePlugin.Computed.Fuel_RemainingLaps], '0.0') + ';' + /* [36] Combustível (Voltas) */
+format([DataCorePlugin.Computed.Fuel_LitersPerLap], '0.00') + ';' + /* [37] Combustível (L/Volta) */
+format([SessionTimeLeft], 'hh\\:mm\\:ss') + ';' +                   /* [38] Tempo Restante Sessão */
+/* [39] Bandeira (Texto) - detecta via GameRawData.Graphics.Flag */
+/* Bandeira universal: usa campos Flag_* para todos os jogos */
+if([DataCorePlugin.GameData.NewData.Flag_Checkered]>0,'Checkered',
+if([DataCorePlugin.GameData.NewData.Flag_Orange]>0,'Orange',
+if([DataCorePlugin.GameData.NewData.Flag_Black]>0,'Black',
+if([DataCorePlugin.GameData.NewData.Flag_White]>0,'White',
+if([DataCorePlugin.GameData.NewData.Flag_Yellow]>0,'Yellow',
+if([DataCorePlugin.GameData.NewData.Flag_Blue]>0,'Blue',
+if([DataCorePlugin.GameData.NewData.Flag_Green]>0,'Green',
+'None'))))))) + ';' +
+isnull([GameRawData.Graphics.Penalties], 0) + ';' +                 /* [40] Penalidades (0/1) */
+isnull([GameRawData.Graphics.CutTrackWarnings], 0) + ';' +          /* [41] Avisos Corte Pista */
+
+/* ==========================================
+   BLOCO 6: MENSAGENS E ALERTAS (Índices 42-43)
+   ========================================== */
+/* [42] ALERTA CRÍTICO (Prioridade Alta) */
+/* Retorna: "ENGINE OFF", "PIT LIMITER", "YELLOW FLAG", "BLUE FLAG", "MEATBALL", "BLACK FLAG", "LOW FUEL", "FINISHED", "SLOW CAR", "GREEN FLAG" ou "NORMAL" */
+if([DataCorePlugin.GameData.NewData.SpeedKmh] < 5 and [DataCorePlugin.GameData.NewData.Rpms] < 500, 'ENGINE OFF',
+if([DataCorePlugin.GameData.NewData.PitLimiterOn], 'PIT LIMITER',
+if([DataCorePlugin.GameData.NewData.Flag_Checkered] > 0, 'FINISHED',
+if([DataCorePlugin.GameData.NewData.Flag_Black] > 0, 'BLACK FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Orange] > 0, 'MEATBALL',
+if([DataCorePlugin.GameData.NewData.Flag_White] > 0, 'SLOW CAR',
+if([DataCorePlugin.GameData.NewData.Flag_Yellow] > 0, 'YELLOW FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Blue] > 0, 'BLUE FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Green] > 0, 'GREEN FLAG',
+if([DataCorePlugin.GameData.NewData.Fuel] < 3, 'LOW FUEL',
+'NORMAL')))))))))) + ';' +
+
+/* [43] POP-UP TEMPORÁRIO (Prioridade Média) */
+/* Retorna texto ex: "BIAS: 54.0" por 1.5s após mudança, ou vazio "" */
+if(changed(1500, [BrakeBias]), 'BIAS: ' + format([BrakeBias], '0.0'),
+if(changed(1500, [TCLevel]), 'TC LEVEL: ' + [TCLevel],
+if(changed(1500, [ABSLevel]), 'ABS LEVEL: ' + [ABSLevel],
+if(changed(1500, [EngineMap]), 'MAP: ' + [EngineMap],
+'')))) + ';' +
+
+/* ==========================================
+   BLOCO 7: DADOS P/ ARDUINO LEDS (Índices 44-47)
+   ========================================== */
+format([CarSettings_CurrentDisplayedRPMPercent], '0') + ';' +       /* [44] RPM % (Repetido p/ facilidade) */
+if([DataCorePlugin.GameData.NewData.SpotterLeft], 1, 0) + ';' +     /* [45] Spotter Esq (0/1) */
+if([DataCorePlugin.GameData.NewData.SpotterRight], 1, 0) + ';' +    /* [46] Spotter Dir (0/1) */
+isnull([ABSActive], 0) + ';' +                                      /* [47] ABS Ativo (0/1) */
+
+/* ==========================================
+   BLOCO 8: DESGASTE E AMBIENTE (Índices 48-57)
+   ========================================== */
+/* Desgaste (0% = Novo, 100% = Destruído - ou vice versa dependendo do jogo) */
+format([TyreWearFrontLeft], '0') + ';' +                            /* [48] Wear FE */
+format([TyreWearFrontRight], '0') + ';' +                           /* [49] Wear FD */
+format([TyreWearRearLeft], '0') + ';' +                             /* [50] Wear TE */
+format([TyreWearRearRight], '0') + ';' +                            /* [51] Wear TD */
+/* Setores */
+isnull(format([Sector1Time], 'ss\\.fff'), '00.000') + ';' +         /* [52] Tempo Setor 1 */
+isnull(format([Sector2Time], 'ss\\.fff'), '00.000') + ';' +         /* [53] Tempo Setor 2 */
+isnull(format([Sector3Time], 'ss\\.fff'), '00.000') + ';' +         /* [54] Tempo Setor 3 */
+/* Ambiente */
+format([AirTemperature], '0') + ';' +                               /* [55] Temp Ar */
+format([RoadTemperature], '0') + ';' +                              /* [56] Temp Pista */
+/* [57] SHIFT LIGHT TRIGGER (0/1) - Gatilho exato de troca */
+if([CarSettings_CurrentDisplayedRPMPercent] >= 95, 1, 0) + ';' +
+
+/* [58] DRS DISPONÍVEL (0/1) - Acender LED verde se 1 */
+if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
+
+/* [59] DRS ATIVO/ABERTO (0/1) - Acender LED Azul ou mostrar na tela */
+if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
+
+/* [60] BATERIA HÍBRIDA/KERS (0-100%) - Barra de energia */
+format([DataCorePlugin.GameData.NewData.KersLevel], '0') + ';' +
+
+/* [61] PRESSÃO TURBO (Bar) - Ex: 1.2 */
+format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0')
+
+// raw data result example:0;1;24;95;2000;00:00.000;00:00.000;00:00.000;0.000;0.00;False;24.6;24.6;25.6;25.6;80;80;80;80;21;21;21;21;0;0;6;0;0;0;0;62.0;100;13;27;0.0;0.0;0.0;0.00;04:01:16;None;0;0;NORMAL;;24;0;0;0;92;92;92;92;;;;21;28;0;0;0;;
+
+
+/*
+script limpo pro simhub
+
 format([DataCorePlugin.GameData.NewData.SpeedKmh],'0') + ';' +
-isnull([DataCorePlugin.GameData.NewData.Gear],'N')+ ';' +
-format([CarSettings_CurrentDisplayedRPMPercent],'0')+ ';' +
-format([CarSettings_RPMRedLineSetting],'0')+ ';' +
-left([CurrentLapTime],3,8) + ';'+ left([LastLapTime],3,8) + ';' +
-left([BestLapTime],3,8) + ';' +
-format([PersistantTrackerPlugin.SessionBestLiveDeltaSeconds],'0.000') + ';'+
+isnull([DataCorePlugin.GameData.NewData.Gear],'N') + ';' +
+format([CarSettings_CurrentDisplayedRPMPercent],'0') + ';' +
+format([CarSettings_RPMRedLineSetting],'0') + ';' +
+format([DataCorePlugin.GameData.NewData.Rpms],'0') + ';' +
+format([CurrentLapTime], 'mm\:ss\.fff') + ';' +
+format([LastLapTime], 'mm\:ss\.fff') + ';' +
+format([BestLapTime], 'mm\:ss\.fff') + ';' +
+format([PersistantTrackerPlugin.SessionBestLiveDeltaSeconds],'0.000') + ';' +
 format([PersistantTrackerPlugin.SessionBestLiveDeltaProgressSeconds],'0.00') + ';' +
+[LapInvalidated] + ';' +
 format([TyrePressureFrontLeft], '00.0') + ';' +
 format([TyrePressureFrontRight], '00.0') + ';' +
 format([TyrePressureRearLeft], '00.0') + ';' +
 format([TyrePressureRearRight], '00.0') + ';' +
+format([TyreTemperatureFrontLeft], '0') + ';' +
+format([TyreTemperatureFrontRight], '0') + ';' +
+format([TyreTemperatureRearLeft], '0') + ';' +
+format([TyreTemperatureRearRight], '0') + ';' +
+format([BrakeTemperatureFrontLeft], '0') + ';' +
+format([BrakeTemperatureFrontRight], '0') + ';' +
+format([BrakeTemperatureRearLeft], '0') + ';' +
+format([BrakeTemperatureRearRight], '0') + ';' +
+format([OilTemperature], '0') + ';' +
+format([WaterTemperature], '0') + ';' +
 [TCLevel] + ';' +
 [TCActive] + ';' +
 [ABSLevel] + ';' +
 [ABSActive] + ';' +
-isnull([GameRawData.Graphics.TCCut]) + ';' +
-[TCLevel] + '  ' + [GameRawData.Graphics.TCCut] + ';' +
+isnull([GameRawData.Graphics.TCCut], 0) + ';' +
 abs(format([BrakeBias], '00.0')) + ';' +
 format([Brake], '0') + ';' +
-[LapInvalidated] + ';' +
-isnull([GameRawData.Graphics.Flag]) + ';' +
-isnull([GameRawData.Graphics.Penalties]) + ';' +
-isnull([GameRawData.Graphics.CutTrackWarnings])
+[Position] + ';' +
+[OpponentsCount] + ';' +
+isnull(format([PersistantTrackerPlugin.DriverAhead_00_Gap], '0.0'), '--') + ';' +
+isnull(format([PersistantTrackerPlugin.DriverBehind_00_Gap], '0.0'), '--') + ';' +
+format([DataCorePlugin.Computed.Fuel_RemainingLaps], '0.0') + ';' +
+format([DataCorePlugin.Computed.Fuel_LitersPerLap], '0.00') + ';' +
+format([SessionTimeLeft], 'hh\:mm\:ss') + ';' +
+if([DataCorePlugin.GameData.NewData.Flag_Checkered]>0,'Checkered',
+if([DataCorePlugin.GameData.NewData.Flag_Orange]>0,'Orange',
+if([DataCorePlugin.GameData.NewData.Flag_Black]>0,'Black',
+if([DataCorePlugin.GameData.NewData.Flag_White]>0,'White',
+if([DataCorePlugin.GameData.NewData.Flag_Yellow]>0,'Yellow',
+if([DataCorePlugin.GameData.NewData.Flag_Blue]>0,'Blue',
+if([DataCorePlugin.GameData.NewData.Flag_Green]>0,'Green',
+'None'))))))) + ';' +
+isnull([GameRawData.Graphics.Penalties], 0) + ';' +
+isnull([GameRawData.Graphics.CutTrackWarnings], 0) + ';' +
+if([DataCorePlugin.GameData.NewData.SpeedKmh] < 5 and [DataCorePlugin.GameData.NewData.Rpms] < 500, 'ENGINE OFF',
+if([DataCorePlugin.GameData.NewData.PitLimiterOn], 'PIT LIMITER',
+if([DataCorePlugin.GameData.NewData.Flag_Checkered] > 0, 'FINISHED',
+if([DataCorePlugin.GameData.NewData.Flag_Black] > 0, 'BLACK FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Orange] > 0, 'MEATBALL',
+if([DataCorePlugin.GameData.NewData.Flag_White] > 0, 'SLOW CAR',
+if([DataCorePlugin.GameData.NewData.Flag_Yellow] > 0, 'YELLOW FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Blue] > 0, 'BLUE FLAG',
+if([DataCorePlugin.GameData.NewData.Flag_Green] > 0, 'GREEN FLAG',
+if([DataCorePlugin.GameData.NewData.Fuel] < 3, 'LOW FUEL',
+'NORMAL')))))))))) + ';' +
+if(changed(1500, [BrakeBias]), 'BIAS: ' + format([BrakeBias], '0.0'),
+if(changed(1500, [TCLevel]), 'TC LEVEL: ' + [TCLevel],
+if(changed(1500, [ABSLevel]), 'ABS LEVEL: ' + [ABSLevel],
+if(changed(1500, [EngineMap]), 'MAP: ' + [EngineMap],
+'')))) + ';' +
+format([CarSettings_CurrentDisplayedRPMPercent], '0') + ';' +
+if([DataCorePlugin.GameData.NewData.SpotterLeft], 1, 0) + ';' +
+if([DataCorePlugin.GameData.NewData.SpotterRight], 1, 0) + ';' +
+[ABSActive] + ';' +
+format([TyreWearFrontLeft], '0') + ';' +
+format([TyreWearFrontRight], '0') + ';' +
+format([TyreWearRearLeft], '0') + ';' +
+format([TyreWearRearRight], '0') + ';' +
+isnull(format([Sector1Time], 'ss\.fff'), '00.000') + ';' +
+isnull(format([Sector2Time], 'ss\.fff'), '00.000') + ';' +
+isnull(format([Sector3Time], 'ss\.fff'), '00.000') + ';' +
+format([AirTemperature], '0') + ';' +
+format([RoadTemperature], '0') + ';' +
+if([CarSettings_CurrentDisplayedRPMPercent] >= 95, 1, 0) + ';' +
+if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
+if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
+format([DataCorePlugin.GameData.NewData.KersLevel], '0') + ';' +
+format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0')
 
+*/

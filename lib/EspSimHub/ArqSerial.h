@@ -25,7 +25,8 @@ class ARQSerial
 {
 private:
 
-	byte partialdatabuffer[24];
+	// Buffer must hold the maximum ARQ payload (length <= 32). Use 64 for safety to avoid overflow.
+	byte partialdatabuffer[64];
 	int Arq_LastValidPacket = 255;
 	RingBuf<uint8_t, 32> DataBuffer;
 	IdleFunction idleFunction = 0;
@@ -106,7 +107,8 @@ private:
 					DebugPort->print("[DBG] length=");
 					DebugPort->println(length);
 				}
-				if (length <= 0 || length > 32) {
+				// validate length against both protocol max (32) and buffer size
+				if (length <= 0 || length > 32 || length > (int)sizeof(partialdatabuffer)) {
 					failureReason = 0x02; // bad length
 					SendNAcq(Arq_LastValidPacket, failureReason);
 					continue;

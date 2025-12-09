@@ -1,4 +1,4 @@
-#define MESSAGE_HEADER 0x03
+#define MESSAGE_HEADER 0x03  // Standard SimHub header - matches ARQ packet detection
 // Debug UART defined in main.cpp
 extern Stream* DebugPort;
 
@@ -129,6 +129,7 @@ void Command_RGBMatrixData()
 void Command_GearData()
 {
 	char gear = FlowSerialTimedRead();
+	FlowSerialWrite(0x15);  // Send ACK response
 }
 
 void Command_CustomProtocolData()

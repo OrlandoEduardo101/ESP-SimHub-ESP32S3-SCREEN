@@ -11,6 +11,9 @@
 // Forward declaration for screenLog
 extern void screenLog(const String &msg);
 
+// Forward declaration for debugLog
+extern void debugLog(const String &msg);
+
 // WT32-SC01 Plus - ST7796 via 8-bit MCU (8080) parallel interface (320x480)
 // IMPORTANT: WT32-SC01 Plus uses 8-bit parallel interface, NOT SPI!
 // Pinout according to official WT32-SC01 Plus documentation:
@@ -136,14 +139,51 @@ private:
 	String brake = "0";
 	String lapInvalidated = "False";
 	
+	// Bloco 5: Estratégia (índices 32-41)
+	String position = "0";
+	String opponentsCount = "0";
+	String driverAheadGap = "--";
+	String driverBehindGap = "--";
+	String fuelRemainingLaps = "0.0";
+	String fuelLitersPerLap = "0.00";
+	String sessionTimeLeft = "00:00:00";
+	
 	// Alert/Flag variables
 	String currentFlag = "None";
 	String prevFlag = "None";
 	String currentPenalties = "0";
 	String prevPenalties = "0";
 	String cutTrackWarnings = "0";
+	String alertMessage = "";  // [42] Alerta crítico (ENGINE OFF, PIT LIMITER, etc.)
+	String popupMessage = "";  // [43] Pop-up temporário (BIAS, TC LEVEL, etc.)
 	unsigned long alertStartTime = 0;
+	bool alertWasShowing = false;  // Track if alert was displayed to trigger clear
+	bool needsFullRedraw = false;  // Flag to trigger full screen redraw after alert
 	static const unsigned long ALERT_DURATION_MS = 3000;  // Show alert for 3 seconds
+
+	// Bloco 7: Dados para Arduino LEDs (índices 44-47)
+	String rpmPercent2 = "0";  // [44] RPM % (repetido)
+	String spotterLeft = "0";  // [45] Spotter esquerdo
+	String spotterRight = "0";  // [46] Spotter direito
+	String absActive2 = "0";   // [47] ABS ativo (repetido)
+
+	// Bloco 8: Desgaste e Ambiente (índices 48-57)
+	String tyreWearFrontLeft = "0";
+	String tyreWearFrontRight = "0";
+	String tyreWearRearLeft = "0";
+	String tyreWearRearRight = "0";
+	String sector1Time = "00.000";
+	String sector2Time = "00.000";
+	String sector3Time = "00.000";
+	String airTemperature = "0";
+	String roadTemperature = "0";
+	
+	// Novos campos adicionados (índices 57-61)
+	String shiftLightTrigger = "0";  // [57] Shift light trigger (0/1)
+	String drsAvailable = "0";       // [58] DRS disponível (0/1)
+	String drsActive = "0";          // [59] DRS ativo (0/1)
+	String kersLevel = "0";          // [60] Bateria KERS (0-100%)
+	String turboBoost = "0.0";       // [61] Pressão turbo (Bar)
 
 	int cellTitleHeight = 0;
 	bool hasReceivedData = false;
@@ -156,9 +196,10 @@ private:
 		PAGE_RACE = 0, 
 		PAGE_TIMING = 1, 
 		PAGE_TELEMETRY = 2,
-		PAGE_RELATIVE = 3,      // NEW: Relative/Head-to-head
-		PAGE_LAPS = 4,           // NEW: Laps/Sectors analysis
-		PAGE_LEADERBOARD = 5     // NEW: Leaderboard
+		PAGE_ADVANCED = 3,       // NEW: Advanced telemetry (Motor, Wear, Env, DRS, KERS, Turbo)
+		PAGE_RELATIVE = 4,       // NEW: Relative/Head-to-head
+		PAGE_LAPS = 5,           // NEW: Laps/Sectors analysis
+		PAGE_LEADERBOARD = 6     // NEW: Leaderboard (placeholder)
 	};
 	DashboardPage currentPage = PAGE_RACE;
 	DashboardPage lastPage = PAGE_RACE;  // Track previous page to detect page changes
@@ -181,14 +222,14 @@ private:
 	
 	// Navigate to next page
 	void nextPage() {
-		currentPage = (DashboardPage)((currentPage + 1) % 6);
+		currentPage = (DashboardPage)((currentPage + 1) % 7);
 		gfx->fillScreen(BLACK);
 		resetDrawCache();
 	}
 	
 	// Navigate to previous page
 	void prevPage() {
-		currentPage = (DashboardPage)((currentPage - 1 + 6) % 6);
+		currentPage = (DashboardPage)((currentPage - 1 + 7) % 7);
 		gfx->fillScreen(BLACK);
 		resetDrawCache();
 	}
@@ -504,36 +545,227 @@ public:
 			if (displayEnabled && gfx != nullptr) {
 				gfx->fillScreen(BLACK);
 			}
+			// Debug: First data received
+			debugLog("[SHCustomProtocol.read()] First data packet received from SimHub!");
 		}
-		String full = "";
 
+		// BLOCO 1: Telemetria Básica (índices 0-4)
 		speed = String(FlowSerialReadStringUntil(';').toInt());
 		gear = FlowSerialReadStringUntil(';');
 		rpmPercent = FlowSerialReadStringUntil(';').toInt();
 		rpmRedLineSetting = FlowSerialReadStringUntil(';').toInt();
+		String rpmsStr = FlowSerialReadStringUntil(';');
+
+		// BLOCO 2: Cronometragem (índices 5-10)
 		currentLapTime = FlowSerialReadStringUntil(';');
 		lastLapTime = FlowSerialReadStringUntil(';');
 		bestLapTime = FlowSerialReadStringUntil(';');
 		sessionBestLiveDeltaSeconds = FlowSerialReadStringUntil(';');
 		sessionBestLiveDeltaProgressSeconds = FlowSerialReadStringUntil(';');
-		tyrePressureFrontLeft  = FlowSerialReadStringUntil(';');
-		tyrePressureFrontRight  = FlowSerialReadStringUntil(';');
-		tyrePressureRearLeft  = FlowSerialReadStringUntil(';');
-		tyrePressureRearRight  = FlowSerialReadStringUntil(';');
-		tcLevel  = FlowSerialReadStringUntil(';');
-		tcActive  = FlowSerialReadStringUntil(';');
-		absLevel  = FlowSerialReadStringUntil(';');
-		absActive  = FlowSerialReadStringUntil(';');
-		isTCCutNull  = FlowSerialReadStringUntil(';');
-		tcTcCut  = FlowSerialReadStringUntil(';');
-		brakeBias  = FlowSerialReadStringUntil(';');
-		brake  = FlowSerialReadStringUntil(';');
-		lapInvalidated  = FlowSerialReadStringUntil(';');
-		currentFlag  = FlowSerialReadStringUntil(';');
-		currentPenalties  = FlowSerialReadStringUntil(';');
-		cutTrackWarnings  = FlowSerialReadStringUntil(';');
+		String lapInvalidatedStr = FlowSerialReadStringUntil(';');
+		lapInvalidated = lapInvalidatedStr;
 
-		const String rest = FlowSerialReadStringUntil('\n');
+		// BLOCO 3: Física e Pneus (índices 11-24)
+		// Pressão dos pneus
+		tyrePressureFrontLeft = FlowSerialReadStringUntil(';');
+		tyrePressureFrontRight = FlowSerialReadStringUntil(';');
+		tyrePressureRearLeft = FlowSerialReadStringUntil(';');
+		tyrePressureRearRight = FlowSerialReadStringUntil(';');
+		// Temperatura dos pneus
+		String tyreTemperatureFrontLeft = FlowSerialReadStringUntil(';');
+		String tyreTemperatureFrontRight = FlowSerialReadStringUntil(';');
+		String tyreTemperatureRearLeft = FlowSerialReadStringUntil(';');
+		String tyreTemperatureRearRight = FlowSerialReadStringUntil(';');
+		// Temperatura dos freios
+		String brakeTemperatureFrontLeft = FlowSerialReadStringUntil(';');
+		String brakeTemperatureFrontRight = FlowSerialReadStringUntil(';');
+		String brakeTemperatureRearLeft = FlowSerialReadStringUntil(';');
+		String brakeTemperatureRearRight = FlowSerialReadStringUntil(';');
+		// Motor
+		String oilTemperature = FlowSerialReadStringUntil(';');
+		String waterTemperature = FlowSerialReadStringUntil(';');
+
+		// BLOCO 4: Eletrônica (índices 25-31)
+		tcLevel = FlowSerialReadStringUntil(';');
+		tcActive = FlowSerialReadStringUntil(';');
+		absLevel = FlowSerialReadStringUntil(';');
+		absActive = FlowSerialReadStringUntil(';');
+		isTCCutNull = FlowSerialReadStringUntil(';');
+		tcTcCut = FlowSerialReadStringUntil(';');
+		brakeBias = FlowSerialReadStringUntil(';');
+		brake = FlowSerialReadStringUntil(';');
+
+		// BLOCO 5: Estratégia (índices 32-41)
+		position = FlowSerialReadStringUntil(';');
+		opponentsCount = FlowSerialReadStringUntil(';');
+		driverAheadGap = FlowSerialReadStringUntil(';');
+		driverBehindGap = FlowSerialReadStringUntil(';');
+		fuelRemainingLaps = FlowSerialReadStringUntil(';');
+		fuelLitersPerLap = FlowSerialReadStringUntil(';');
+		sessionTimeLeft = FlowSerialReadStringUntil(';');
+		currentFlag = FlowSerialReadStringUntil(';');
+		currentFlag.trim();
+		currentPenalties = FlowSerialReadStringUntil(';');
+		cutTrackWarnings = FlowSerialReadStringUntil(';');
+		
+		// Debug: Log flag value (raw)
+		debugLog(String("[RAW] idx39 flag: '") + currentFlag + "'");
+		debugLog(String("[SHCustomProtocol] Flag value received [39]: '") + currentFlag + 
+				 String("' (len=") + currentFlag.length() + ")");
+
+		// BLOCO 6: Mensagens e Alertas (índices 42-43)
+		alertMessage = FlowSerialReadStringUntil(';');
+		popupMessage = FlowSerialReadStringUntil(';');
+		alertMessage.trim();
+		popupMessage.trim();
+
+		// Debug: window around flag/alert (indices 38-43)
+		debugLog(String("[CHECK idx38-43] time=") + sessionTimeLeft +
+		         " | flag=" + currentFlag +
+		         " | pen=" + currentPenalties +
+		         " | cut=" + cutTrackWarnings +
+		         " | alert=" + alertMessage +
+		         " | popup=" + popupMessage);
+		
+		// Debug: Log alert and popup raw values
+		debugLog(String("[RAW] idx42 alert: '") + alertMessage + "'");
+		debugLog(String("[SHCustomProtocol] Alert [42]: '") + alertMessage + 
+				 String("' (len=") + alertMessage.length() + ")");
+		debugLog(String("[SHCustomProtocol] Popup [43]: '") + popupMessage + 
+				 String("' (len=") + popupMessage.length() + ")");
+
+		// BLOCO 7: Dados para Arduino LEDs (índices 44-47)
+		rpmPercent2 = FlowSerialReadStringUntil(';');
+		spotterLeft = FlowSerialReadStringUntil(';');
+		spotterRight = FlowSerialReadStringUntil(';');
+		absActive2 = FlowSerialReadStringUntil(';');
+
+		// BLOCO 8: Desgaste e Ambiente (índices 48-61)
+		tyreWearFrontLeft = FlowSerialReadStringUntil(';');
+		tyreWearFrontRight = FlowSerialReadStringUntil(';');
+		tyreWearRearLeft = FlowSerialReadStringUntil(';');
+		tyreWearRearRight = FlowSerialReadStringUntil(';');
+		sector1Time = FlowSerialReadStringUntil(';');
+		sector2Time = FlowSerialReadStringUntil(';');
+		sector3Time = FlowSerialReadStringUntil(';');
+		airTemperature = FlowSerialReadStringUntil(';');
+		roadTemperature = FlowSerialReadStringUntil(';');
+		shiftLightTrigger = FlowSerialReadStringUntil(';');
+		drsAvailable = FlowSerialReadStringUntil(';');
+		drsActive = FlowSerialReadStringUntil(';');
+		kersLevel = FlowSerialReadStringUntil(';');
+		turboBoost = FlowSerialReadStringUntil('\n');  // Último campo (índice 61)
+
+		// Build raw packet log (indices 0-61)
+		String rawPacket; rawPacket.reserve(512);
+		auto appendField = [&](const String &field) { rawPacket += field; rawPacket += ';'; };
+		appendField(speed);
+		appendField(gear);
+		appendField(String(rpmPercent));
+		appendField(String(rpmRedLineSetting));
+		appendField(rpmsStr);
+		appendField(currentLapTime);
+		appendField(lastLapTime);
+		appendField(bestLapTime);
+		appendField(sessionBestLiveDeltaSeconds);
+		appendField(sessionBestLiveDeltaProgressSeconds);
+		appendField(lapInvalidatedStr);
+		appendField(tyrePressureFrontLeft);
+		appendField(tyrePressureFrontRight);
+		appendField(tyrePressureRearLeft);
+		appendField(tyrePressureRearRight);
+		appendField(tyreTemperatureFrontLeft);
+		appendField(tyreTemperatureFrontRight);
+		appendField(tyreTemperatureRearLeft);
+		appendField(tyreTemperatureRearRight);
+		appendField(brakeTemperatureFrontLeft);
+		appendField(brakeTemperatureFrontRight);
+		appendField(brakeTemperatureRearLeft);
+		appendField(brakeTemperatureRearRight);
+		appendField(oilTemperature);
+		appendField(waterTemperature);
+		appendField(tcLevel);
+		appendField(tcActive);
+		appendField(absLevel);
+		appendField(absActive);
+		appendField(isTCCutNull);
+		appendField(tcTcCut);
+		appendField(brakeBias);
+		appendField(brake);
+		appendField(position);
+		appendField(opponentsCount);
+		appendField(driverAheadGap);
+		appendField(driverBehindGap);
+		appendField(fuelRemainingLaps);
+		appendField(fuelLitersPerLap);
+		appendField(sessionTimeLeft);
+		appendField(currentFlag);
+		appendField(currentPenalties);
+		appendField(cutTrackWarnings);
+		appendField(alertMessage);
+		appendField(popupMessage);
+		appendField(rpmPercent2);
+		appendField(spotterLeft);
+		appendField(spotterRight);
+		appendField(absActive2);
+		appendField(tyreWearFrontLeft);
+		appendField(tyreWearFrontRight);
+		appendField(tyreWearRearLeft);
+		appendField(tyreWearRearRight);
+		appendField(sector1Time);
+		appendField(sector2Time);
+		appendField(sector3Time);
+		appendField(airTemperature);
+		appendField(roadTemperature);
+		appendField(shiftLightTrigger);
+		appendField(drsAvailable);
+		appendField(drsActive);
+		appendField(kersLevel);
+		appendField(turboBoost);
+		if (rawPacket.length() > 0) rawPacket.remove(rawPacket.length() - 1); // remove last ';'
+		debugLog(String("[RAW] packet: ") + rawPacket);
+		
+
+		// Re-parse critical indices from rawPacket to avoid any misalignment
+		String fields[62];
+		int fieldIdx = 0;
+		int last = 0;
+		for (int i = 0; i <= rawPacket.length(); i++) {
+			if (i == rawPacket.length() || rawPacket.charAt(i) == ';') {
+				if (fieldIdx < 62) {
+					fields[fieldIdx] = rawPacket.substring(last, i);
+				}
+				fieldIdx++;
+				last = i + 1;
+			}
+		}
+		// Only override if we got at least up to index 43
+		if (fieldIdx > 43) {
+			String sTime = fields[38];
+			String sFlag = fields[39];
+			String sPen = fields[40];
+			String sCut = fields[41];
+			String sAlert = fields[42];
+			String sPopup = fields[43];
+			sTime.trim(); sFlag.trim(); sPen.trim(); sCut.trim(); sAlert.trim(); sPopup.trim();
+			sessionTimeLeft = sTime;
+			currentFlag = sFlag;
+			currentPenalties = sPen;
+			cutTrackWarnings = sCut;
+			alertMessage = sAlert;
+			popupMessage = sPopup;
+			debugLog(String("[REPARSE idx38-43] time=") + sessionTimeLeft +
+			         " | flag=" + currentFlag +
+			         " | pen=" + currentPenalties +
+			         " | cut=" + cutTrackWarnings +
+			         " | alert=" + alertMessage +
+			         " | popup=" + popupMessage);
+		}
+
+		// Debug: Log complete packet received
+		debugLog(String("[SHCustomProtocol] Telemetry packet complete - Speed: ") + speed + 
+				 String(" | Alert: ") + (alertMessage != "NORMAL" ? alertMessage : "none") +
+				 String(" | Flag: ") + currentFlag);
 	}
 
 	// Called once per arduino loop, timing can't be predicted,
@@ -580,6 +812,13 @@ public:
 			return;
 		}
 		
+		// Check if we need full redraw after alert expired
+		if (needsFullRedraw) {
+			gfx->fillScreen(BLACK);
+			resetDrawCache();  // Clear all caches
+			needsFullRedraw = false;
+		}
+		
 		// Draw page-specific content
 		switch (currentPage) {
 			case PAGE_RACE:
@@ -590,6 +829,9 @@ public:
 				break;
 			case PAGE_TELEMETRY:
 				drawTelemetryPageContent();
+				break;
+			case PAGE_ADVANCED:
+				drawAdvancedTelemetryPage();
 				break;
 			case PAGE_RELATIVE:
 				drawRelativePageContent();
@@ -610,15 +852,15 @@ public:
 	}
 	
 	void drawPageIndicator() {
-		// Draw small page indicator dots at bottom center (6 pages)
+		// Draw small page indicator dots at bottom center (7 pages)
 		// Positioned in dedicated padding area at bottom
 		int dotRadius = 2;
 		int dotSpacing = 8;
-		int totalWidth = (6 - 1) * dotSpacing + (dotRadius * 2);
+		int totalWidth = (7 - 1) * dotSpacing + (dotRadius * 2);
 		int startX = (SCREEN_WIDTH - totalWidth) / 2;  // Center horizontally
 		int startY = SCREEN_HEIGHT + 41;  // 8px from bottom margin (colado na borda)
 		
-		for (int i = 0; i < 6; i++) {
+		for (int i = 0; i < 7; i++) {
 			uint16_t color = (i == currentPage) ? WHITE : RGB565(100, 100, 100);
 			gfx->fillCircle(startX + (i * dotSpacing), startY, dotRadius, color);
 		}
@@ -630,29 +872,41 @@ public:
 		// this takes 2 cells in height, hence CELL_HEIGHT is the half point
 		drawGear(COL[2] + HALF_CELL_WIDTH, ROW[1] + CELL_HEIGHT);
 
-		// First+Second Column (Lap times)
+		// First Column (Lap times + Position)
 		drawCell(COL[0], ROW[1], bestLapTime, "bestLapTime", "Best Lap", "left");
 		drawCell(COL[0], ROW[2], lastLapTime, "lastLapTime", "Last Lap", "left");
 		drawCell(COL[0], ROW[3], currentLapTime, "currenLapTime", "Current Lap", "left", lapInvalidated == "True" ? RED : WHITE);
+		// NEW: Position
+		drawCell(COL[0], ROW[4], position + "/" + opponentsCount, "position", "POS", "left", WHITE);
 
-		// Third Column (speed)
-		drawCell(COL[2], ROW[3], speed, "speed", "Speed", "center");
+		// Second Column (Speed + Gaps)
+		drawCell(COL[2], ROW[2], speed, "speed", "Speed", "center");
+		// NEW: Gaps to adjacent drivers
+		drawCell(COL[2], ROW[3], driverAheadGap, "driverAheadGap", "Gap+", "center", WHITE);
+		drawCell(COL[2], ROW[4], driverBehindGap, "driverBehindGap", "Gap-", "center", WHITE);
 
-		// Fourth+Fifth Column (delta)
+		// Third Column (delta)
 		drawCell(SCREEN_WIDTH, ROW[1], sessionBestLiveDeltaSeconds, "sessionBestLiveDeltaSeconds", "Delta", "right", sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
 		drawCell(SCREEN_WIDTH, ROW[2], sessionBestLiveDeltaProgressSeconds, "sessionBestLiveDeltaProgressSeconds", "Delta P", "right", sessionBestLiveDeltaProgressSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		
+		// NEW: Combustível
+		drawCell(SCREEN_WIDTH, ROW[3], fuelRemainingLaps, "fuelRemainingLaps", "Fuel L", "right", fuelRemainingLaps.toFloat() < 2 ? RED : WHITE);
+		// NEW: DRS
+		uint16_t drsColor = WHITE;
+		if (drsActive == "1") drsColor = BLUE;
+		else if (drsAvailable == "1") drsColor = GREEN;
+		drawCell(SCREEN_WIDTH, ROW[4], drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "CLOSED"), "drsStatus", "DRS", "right", drsColor);
 
-
-		// (TC, ABS, BB)
+		// Bottom row (TC, ABS, BB)
 		if (isTCCutNull == "False") {
 			drawCell(COL[0], ROW[4], tcTcCut, "tcTcCut", "TC TC2", "center", YELLOW);
 		} else {
-			drawCell(COL[0], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
+			drawCell(COL[1], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
 		}
 		drawCell(COL[1], ROW[4], absLevel, "absLevel", "ABS", "center", BLUE);
 		drawCell(COL[2], ROW[4], brakeBias, "brakeBias", "BB", "center", MAGENTA);
 
-		// (tyre pressure)
+		// Tyre pressure (unchanged)
 		drawCell(COL[3], ROW[3], tyrePressureFrontLeft, "tyrePressureFrontLeft", "FL", "center", CYAN);
 		drawCell(COL[4], ROW[3], tyrePressureFrontRight, "tyrePressureFrontRight", "FR", "center", CYAN);
 		drawCell(COL[3], ROW[4], tyrePressureRearLeft, "tyrePressureRearLeft", "RL", "center", CYAN);
@@ -807,56 +1061,114 @@ public:
 		gfx->println(tyrePressureRearRight);
 	}
 	
-	void drawRelativePageContent() {
-		// PAGE 4: Relative/Head-to-Head Comparison (full width)
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 12);
-		gfx->print("HEAD TO HEAD");
-		
-		// Driver ahead - Top box
-		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 80, MAGENTA);
-		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, MAGENTA);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 58);
-		gfx->print("DRIVER AHEAD");
+	void drawAdvancedTelemetryPage() {
+		// PAGE 3B: Advanced Telemetry - Motor, Wear, Environment, DRS, KERS, Turbo
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 80));  // Header background (Purple)
 		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 80);
-		gfx->print("Position: 1st");
-		gfx->setCursor(10, 95);
-		gfx->print("Gap: +0.123s");
-		gfx->setCursor(10, 110);
-		gfx->print("Last: 01:35.74");
+		gfx->setTextSize(3);
+		gfx->setCursor(10, 10);
+		gfx->print("ADVANCED");
 		
-		// YOU - Middle box (highlighted)
-		gfx->drawRect(5, 140, SCREEN_WIDTH - 10, 80, CYAN);
-		gfx->fillRect(5, 140, SCREEN_WIDTH - 10, 25, CYAN);
+		int boxHeight = 45;
+		int boxWidth = (SCREEN_WIDTH - 15) / 2;
+		int yPos = 55;
+		
+		// Row 1: Motor temperatures
+		// Oil Temperature
+		gfx->drawRect(5, yPos, boxWidth, boxHeight, WHITE);
+		gfx->fillRect(5, yPos, boxWidth, 20, WHITE);
 		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, yPos + 5);
+		gfx->print("OIL TEMP");
+		gfx->setTextColor(WHITE);
 		gfx->setTextSize(2);
-		gfx->setCursor(10, 145);
-		gfx->print(">>> YOU <<<");
-		gfx->setTextColor(CYAN);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 175);
-		gfx->print("Position: 2nd");
-		gfx->setCursor(10, 190);
-		gfx->print("Last: " + lastLapTime);
-		gfx->setCursor(10, 205);
-		gfx->print("Current: " + currentLapTime);
+		gfx->setCursor(10, yPos + 25);
+		gfx->print("--C");  // Placeholder - seria: oilTemperature + "C"
 		
-		// Driver behind - Bottom box
-		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, ORANGE);
-		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, ORANGE);
+		// Water Temperature
+		gfx->drawRect(5 + boxWidth + 5, yPos, boxWidth, boxHeight, WHITE);
+		gfx->fillRect(5 + boxWidth + 5, yPos, boxWidth, 20, WHITE);
 		gfx->setTextColor(BLACK);
 		gfx->setTextSize(1);
-		gfx->setCursor(10, 237);
-		gfx->print("DRIVER BEHIND");
-		gfx->setTextColor(ORANGE);
-		gfx->setCursor(10, 253);
-		gfx->print("Position: 3rd (-0.500s)");
+		gfx->setCursor(10 + boxWidth + 5, yPos + 5);
+		gfx->print("WATER TEMP");
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(2);
+		gfx->setCursor(10 + boxWidth + 5, yPos + 25);
+		gfx->print("--C");  // Placeholder
+		
+		yPos += boxHeight + 5;
+		
+		// Row 2: Tyre Wear
+		gfx->drawRect(5, yPos, SCREEN_WIDTH - 10, boxHeight, RGB565(200, 100, 0));
+		gfx->fillRect(5, yPos, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, yPos + 5);
+		gfx->print("TYRE WEAR | FL: 0% FR: 0% RL: 0% RR: 0%");  // Placeholder
+		
+		yPos += boxHeight + 5;
+		
+		// Row 3: Environment + DRS/KERS/Turbo
+		// Air Temp
+		gfx->drawRect(5, yPos, 60, boxHeight, RGB565(0, 100, 200));
+		gfx->fillRect(5, yPos, 60, 20, RGB565(0, 100, 200));
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, yPos + 5);
+		gfx->print("AIR");
+		gfx->setTextColor(RGB565(0, 150, 255));
+		gfx->setTextSize(1);
+		gfx->setCursor(10, yPos + 25);
+		gfx->print("--C");
+		
+		// Road Temp
+		gfx->drawRect(70, yPos, 60, boxHeight, RGB565(200, 0, 0));
+		gfx->fillRect(70, yPos, 60, 20, RGB565(200, 0, 0));
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(75, yPos + 5);
+		gfx->print("ROAD");
+		gfx->setTextColor(RED);
+		gfx->setTextSize(1);
+		gfx->setCursor(75, yPos + 25);
+		gfx->print("--C");
+		
+		// DRS
+		uint16_t drsBoxColor = drsActive == "1" ? BLUE : (drsAvailable == "1" ? GREEN : RGB565(50, 50, 50));
+		gfx->drawRect(135, yPos, 60, boxHeight, drsBoxColor);
+		gfx->fillRect(135, yPos, 60, 20, drsBoxColor);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(140, yPos + 5);
+		gfx->print("DRS");
+		gfx->setTextColor(drsBoxColor == BLUE ? BLUE : WHITE);
+		gfx->setTextSize(1);
+		gfx->setCursor(140, yPos + 25);
+		gfx->print(drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "OFF"));
+		
+		// KERS
+		uint16_t kersBarWidth = (String(kersLevel).toInt() * 40) / 100;  // 40px width for 100%
+		gfx->drawRect(200, yPos, 60, boxHeight, MAGENTA);
+		gfx->fillRect(200, yPos, 60, 20, MAGENTA);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(205, yPos + 5);
+		gfx->print("KERS");
+		gfx->fillRect(200, yPos + 25, kersBarWidth, 15, MAGENTA);
+		
+		// Turbo
+		gfx->drawRect(265, yPos, 65, boxHeight, RGB565(255, 128, 0));
+		gfx->fillRect(265, yPos, 65, 20, RGB565(255, 128, 0));
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(270, yPos + 5);
+		gfx->print("TURBO");
+		gfx->setTextColor(RGB565(255, 200, 0));
+		gfx->setTextSize(1);
+		gfx->setCursor(270, yPos + 25);
+		gfx->print("0.0B");  // Placeholder
 	}
 	
 	void drawLapsPageContent() {
@@ -907,7 +1219,7 @@ public:
 		gfx->setCursor(10 + (boxWidth + 5) * 2, 72);
 		gfx->print(currentLapTime);
 		
-		// Sector times - detailed box (full width)
+		// Sector times - detailed box (full width) - AGORA COM DADOS REAIS
 		gfx->drawRect(5, 125, SCREEN_WIDTH - 10, 120, WHITE);
 		gfx->fillRect(5, 125, SCREEN_WIDTH - 10, 25, WHITE);
 		gfx->setTextColor(BLACK);
@@ -920,39 +1232,89 @@ public:
 		gfx->setCursor(15, 160);
 		gfx->print("S1");
 		gfx->setCursor(45, 160);
-		gfx->print(": 00:35.12");
-		gfx->setTextColor(GREEN);
-		gfx->setCursor(220, 160);
-		gfx->print("[BEST]");
+		gfx->print(": " + sector1Time);
 		
 		// Sector 2
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(15, 180);
 		gfx->print("S2");
 		gfx->setCursor(45, 180);
-		gfx->print(": 00:35.45");
-		gfx->setTextColor(YELLOW);
-		gfx->setCursor(220, 180);
-		gfx->print("[+0.33s]");
+		gfx->print(": " + sector2Time);
 		
 		// Sector 3
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(15, 200);
 		gfx->print("S3");
 		gfx->setCursor(45, 200);
-		gfx->print(": 00:25.17");
-		gfx->setTextColor(CYAN);
-		gfx->setCursor(220, 200);
-		gfx->print("[+0.05s]");
+		gfx->print(": " + sector3Time);
 		
-		// Delta indicator (full width)
-		gfx->drawRect(5, 255, SCREEN_WIDTH - 10, 20, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
-		gfx->fillRect(5, 255, SCREEN_WIDTH - 10, 20, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		// Lap invalid status
+		if (lapInvalidated == "True") {
+			gfx->setTextColor(RED);
+			gfx->setCursor(220, 145);
+			gfx->print("INVALID");
+		}
+		
+		// Tyre wear bar (full width at bottom)
+		gfx->drawRect(5, 260, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
+		gfx->fillRect(5, 260, SCREEN_WIDTH - 10, 5, RGB565(200, 100, 0));
+		gfx->setTextColor(RGB565(255, 200, 0));
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 265);
+		
+		// Draw wear percentages
+		String wearStr = "Wear - FL:" + tyreWearFrontLeft + "% FR:" + tyreWearFrontRight + 
+		                 "% RL:" + tyreWearRearLeft + "% RR:" + tyreWearRearRight + "%";
+		gfx->print(wearStr);
+	}
+	
+	void drawRelativePageContent() {
+		// PAGE 4: Relative/Head-to-Head Comparison (full width)
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 12);
+		gfx->print("HEAD TO HEAD");
+		
+		// Driver ahead - Top box
+		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 80, MAGENTA);
+		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, MAGENTA);
 		gfx->setTextColor(BLACK);
 		gfx->setTextSize(1);
-		gfx->setCursor(120, 262);
-		gfx->print("Delta: ");
-		gfx->print(sessionBestLiveDeltaSeconds);
+		gfx->setCursor(10, 58);
+		gfx->print("DRIVER AHEAD");
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 80);
+		gfx->print("Position: --");
+		gfx->setCursor(10, 95);
+		gfx->print("Gap: " + driverAheadGap + "s");
+		gfx->setCursor(10, 110);
+		gfx->print("Last: 01:35.74");
+		
+		// YOU - Middle box (highlighted)
+		gfx->drawRect(5, 140, SCREEN_WIDTH - 10, 80, CYAN);
+		gfx->fillRect(5, 140, SCREEN_WIDTH - 10, 25, CYAN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 145);
+		gfx->print(">>> YOU <<<");
+		gfx->setTextColor(CYAN);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 175);
+		gfx->print("Position: " + position);
+		gfx->setCursor(10, 190);
+		gfx->print("Last: " + lastLapTime);
+		gfx->setCursor(10, 205);
+		gfx->print("Current: " + currentLapTime);
+		
+		// Driver behind - Bottom box
+		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, ORANGE);
+		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, ORANGE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 237);
+		gfx->print("DRIVER BEHIND: Gap " + driverBehindGap + "s");
 	}
 	
 	void drawLeaderboardPageContent() {
@@ -1185,6 +1547,27 @@ public:
 
 	}
 	
+	// Helper function to validate alert strings - prevents garbage data display
+	bool isValidAlertString(const String &str) {
+		String normalized = str;
+		normalized.trim();
+		String upper = normalized;
+		upper.toUpperCase();
+
+		// Check for valid alert strings only
+		if (upper == "ENGINE OFF" || upper == "PIT LIMITER" || upper == "YELLOW FLAG" || 
+			upper == "BLUE FLAG" || upper == "LOW FUEL" || upper == "BLACK FLAG" ||
+			upper == "MEATBALL" || upper == "SLOW CAR" || upper == "GREEN FLAG" ||
+			upper == "FINISHED" || upper == "RED FLAG") {
+			return true;
+		}
+		// Check for pop-up messages (contain colon for labels)
+		if (upper.indexOf(':') > 0) {
+			return true;
+		}
+		return false;
+	}
+	
 	// Draw alerts/flags in the center of the screen
 	void drawAlert() {
 		if (!canUseDisplay()) return;
@@ -1194,38 +1577,124 @@ public:
 		String alertText = "";
 		uint16_t bgColor = BLACK;
 		uint16_t textColor = WHITE;
+		String alertNormalized = alertMessage;  // keep raw for display, normalized for checks
+		alertNormalized.trim();
+		String alertUpper = alertNormalized;
+		alertUpper.toUpperCase();
+		String popupNormalized = popupMessage;
+		popupNormalized.trim();
+		String popupUpper = popupNormalized;
+		popupUpper.toUpperCase();
 		
-		// Check for flag changes
-		if (currentFlag != prevFlag && currentFlag != "None") {
+		// PRIORIDADE 1: Alertas críticos do SimHub (alertMessage)
+		// Only show if it's a real alert (not empty, not "NORMAL", not "NONE", not "0")
+		// Additional safety: check if string contains only valid characters (alphanumeric, space, colon, etc)
+		if (alertUpper.length() > 0 && 
+			alertUpper != "NORMAL" && 
+			alertUpper != "NONE" && 
+			alertUpper != "0" && 
+			isValidAlertString(alertUpper)) {
 			shouldShowAlert = true;
 			alertStartTime = millis();
-			prevFlag = currentFlag;
+			alertText = alertNormalized;
 			
-			if (currentFlag == "Blue") {
-				alertText = "BLUE FLAG";
-				bgColor = BLUE;
-				textColor = WHITE;
-			} else if (currentFlag == "Yellow") {
-				alertText = "YELLOW FLAG";
+			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
+				bgColor = RGB565(20, 20, 20);
+				textColor = RED;
+			} else if (alertUpper.indexOf("PIT LIMITER") >= 0) {
+				bgColor = ORANGE;
+				textColor = BLACK;
+			} else if (alertUpper.indexOf("YELLOW FLAG") >= 0) {
 				bgColor = YELLOW;
 				textColor = BLACK;
-			} else if (currentFlag == "Red") {
-				alertText = "RED FLAG";
-				bgColor = RED;
+			} else if (alertUpper.indexOf("BLUE FLAG") >= 0) {
+				bgColor = BLUE;
 				textColor = WHITE;
-			} else if (currentFlag == "White") {
-				alertText = "WHITE FLAG";
-				bgColor = WHITE;
-				textColor = BLACK;
-			} else if (currentFlag == "Black") {
-				alertText = "BLACK FLAG";
-				bgColor = RGB565(20, 20, 20);
+			} else if (alertUpper.indexOf("LOW FUEL") >= 0) {
+				bgColor = RED;
+				textColor = YELLOW;
+			} else {
+				bgColor = MAGENTA;
 				textColor = WHITE;
 			}
 		}
 		
-		// Check for penalty changes
-		if (currentPenalties != prevPenalties && currentPenalties.toInt() > 0) {
+		// PRIORIDADE 2: Pop-up temporário (popupMessage) - mensagens de mudanças menores
+		// Only show if it's a real message (not empty, not "NORMAL", not "NONE", not "0")
+		if (popupUpper.length() > 0 && 
+			popupUpper != "NORMAL" && 
+			popupUpper != "NONE" && 
+			popupUpper != "0" && 
+			isValidAlertString(popupUpper) &&
+			alertText.length() == 0) {
+			shouldShowAlert = true;
+			alertStartTime = millis();
+			alertText = popupNormalized;
+			bgColor = RGB565(50, 50, 100);  // Dark blue background
+			textColor = YELLOW;
+		}
+		
+		// Check for flag changes - TODAS AS BANDEIRAS SUPORTADAS
+		// Only process if flag is not "None" and not empty
+		String flagValue = currentFlag;
+		flagValue.trim();
+		if (flagValue != prevFlag && flagValue != "None" && flagValue != "" && alertText.length() == 0) {
+			shouldShowAlert = true;
+			alertStartTime = millis();
+			prevFlag = flagValue;
+			
+			// 🔵 Blue Flag
+			if (flagValue.equalsIgnoreCase("Blue")) {
+				alertText = "BLUE FLAG";
+				bgColor = BLUE;
+				textColor = WHITE;
+			} 
+			// 🟡 Yellow Flag
+			else if (flagValue.equalsIgnoreCase("Yellow")) {
+				alertText = "YELLOW FLAG";
+				bgColor = YELLOW;
+				textColor = BLACK;
+			} 
+			// ⚫ Black Flag
+			else if (flagValue.equalsIgnoreCase("Black")) {
+				alertText = "BLACK FLAG";
+				bgColor = RGB565(20, 20, 20);
+				textColor = WHITE;
+			} 
+			// 🟠 Orange Flag (Meatball)
+			else if (flagValue.equalsIgnoreCase("Orange")) {
+				alertText = "MEATBALL";
+				bgColor = ORANGE;
+				textColor = BLACK;
+			} 
+			// ⚪ White Flag (Slow Car)
+			else if (flagValue.equalsIgnoreCase("White")) {
+				alertText = "SLOW CAR";
+				bgColor = WHITE;
+				textColor = BLACK;
+			} 
+			// 🟢 Green Flag
+			else if (flagValue.equalsIgnoreCase("Green")) {
+				alertText = "GREEN FLAG";
+				bgColor = GREEN;
+				textColor = BLACK;
+			} 
+			// 🏁 Checkered Flag (Finished)
+			else if (flagValue.equalsIgnoreCase("Checkered")) {
+				alertText = "FINISHED";
+				bgColor = WHITE;
+				textColor = BLACK;
+			}
+			// 🔴 Red Flag
+			else if (flagValue.equalsIgnoreCase("Red")) {
+				alertText = "RED FLAG";
+				bgColor = RED;
+				textColor = WHITE;
+			}
+		}
+		
+		// Check for penalty changes (fallback)
+		if (currentPenalties != prevPenalties && currentPenalties.toInt() > 0 && alertText.length() == 0) {
 			shouldShowAlert = true;
 			alertStartTime = millis();
 			prevPenalties = currentPenalties;
@@ -1234,22 +1703,24 @@ public:
 			textColor = WHITE;
 		}
 		
+		// Alert box dimensions (keep consistent for clear/draw)
+		int alertWidth = 240;
+		int alertHeight = 120;
+		int alertX = (SCREEN_WIDTH - alertWidth) / 2;
+		int alertY = (SCREEN_HEIGHT - alertHeight) / 2;
+		
 		// Check if alert should still be displayed (3 second duration)
-		if (shouldShowAlert || (millis() - alertStartTime) < ALERT_DURATION_MS) {
+		bool showingNow = shouldShowAlert || (millis() - alertStartTime) < ALERT_DURATION_MS;
+		
+		if (showingNow) {
 			if (alertText.length() > 0) {
-				// Draw semi-transparent dark overlay
-				int alertWidth = 200;
-				int alertHeight = 100;
-				int alertX = (SCREEN_WIDTH - alertWidth) / 2;
-				int alertY = (SCREEN_HEIGHT - alertHeight) / 2;
-				
 				// Draw background box
 				gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgColor);
 				gfx->drawRect(alertX, alertY, alertWidth, alertHeight, WHITE);
 				
 				// Draw text
 				gfx->setTextColor(textColor);
-				gfx->setTextSize(3);
+				gfx->setTextSize(2);
 				int16_t x1, y1;
 				uint16_t w, h;
 				gfx->getTextBounds(alertText, 0, 0, &x1, &y1, &w, &h);
@@ -1257,7 +1728,12 @@ public:
 				int textY = alertY + (alertHeight - h) / 2;
 				gfx->setCursor(textX, textY);
 				gfx->print(alertText);
+				alertWasShowing = true;  // Mark that alert is active
 			}
+		} else if (alertWasShowing) {
+			// Alert just expired - set flag to trigger full redraw in next draw() cycle
+			alertWasShowing = false;
+			needsFullRedraw = true;
 		}
 	}
 };

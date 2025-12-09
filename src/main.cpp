@@ -55,6 +55,22 @@ RTC_DATA_ATTR uint32_t bootCount = 0;
 // Dummy debug port (no actual output)
 Stream* DebugPort = nullptr;
 
+// ==========================================
+// DEBUG LOGGING
+// Using UART0 alternative pins (TXD0/RXD0) for debug output
+// This allows monitoring via ZXACC on COM12 while SimHub uses USB CDC on COM11
+// TXD0 = GPIO 43 (Debug Interface Pin 3)
+// RXD0 = GPIO 44 (Debug Interface Pin 4)
+// ==========================================
+
+HardwareSerial DebugSerial(0);  // UART0 on custom pins
+
+// Debug logging function - sends to Debug UART
+void debugLog(const String &msg) {
+	DebugSerial.println(msg);
+	DebugSerial.flush();
+}
+
 void idle(bool critical);
 
 // Don't change this
@@ -115,6 +131,17 @@ void setup(void)
 	Serial.flush();
 	delay(200);
 	
+	// ==========================================
+	// Initialize UART0 for DEBUG logging via ZXACC (COM12)
+	// This allows monitoring while SimHub uses USB CDC on COM11
+	// Using pins 43 (TXD0) and 44 (RXD0)
+	// ==========================================
+	DebugSerial.begin(115200, SERIAL_8N1, 44, 43);  // RX=44, TX=43
+	debugLog("\n========================================");
+	debugLog("DEBUG UART0 Initialized on COM12");
+	debugLog("Monitoring via ZXACC while SimHub uses COM11");
+	debugLog("========================================\n");
+	
 	// Print immediate boot message
 	Serial.print("\n\n========================================\n");
 	Serial.print(">>> ESP32-S3 BOOT SEQUENCE START\n");
@@ -136,19 +163,23 @@ void setup(void)
 
 	// Bring up display and protocol so we can show logs on screen
 	Serial.println(">>> About to call shCustomProtocol.setup()");
+	debugLog(">>> About to call shCustomProtocol.setup()");
 	Serial.flush();
 	delay(100);
 	
 	shCustomProtocol.setup();
 	
 	Serial.println(">>> shCustomProtocol.setup() completed");
+	debugLog(">>> shCustomProtocol.setup() completed");
 	Serial.flush();
 	delay(100);
 	
 	arqserial.setIdleFunction(idle);
 	screenLog("Display init OK");
+	debugLog("Display init OK");
 	
 	Serial.println(">>> Setup complete!");
+	debugLog(">>> Setup complete!");
 	Serial.println("========================================\n");
 	Serial.flush();
 }
@@ -172,10 +203,32 @@ void loop()
 
 	if (FlowSerialAvailable() > 0) {
 		int r = FlowSerialTimedRead();
+		Serial.print("[main.loop] Received byte: 0x");
+		Serial.println(r, HEX);
+		debugLog(String("[main.loop] Received byte: 0x") + String(r, HEX));
+		Serial.flush();
+		
 		if (r == MESSAGE_HEADER)
 		{
+			Serial.println("[main.loop] MESSAGE_HEADER detected!");
+			debugLog("[main.loop] MESSAGE_HEADER detected!");
+			Serial.flush();
 			lastSerialActivity = millis();
 			loop_opt = FlowSerialTimedRead();
+			Serial.print("[main.loop] Command byte: ");
+			Serial.println((char)loop_opt);
+			debugLog(String("[main.loop] Command byte: ") + (char)loop_opt);
+			Serial.flush();
+			
+			// PROTECTION: If command byte is 0x01, this is actually an ARQ packet being re-read
+			// Skip processing to avoid infinite loops
+			if (loop_opt == 0x01) {
+				Serial.println("[main.loop] WARNING: Detected ARQ packet (0x01), skipping");
+				debugLog("[main.loop] WARNING: Detected ARQ packet (0x01), skipping");
+				yield();
+				return;
+			}
+			
 			yield(); // Feed watchdog
 			
 			switch(loop_opt) {
@@ -192,19 +245,24 @@ void loop()
 					String xaction = FlowSerialReadStringUntil(' ', '\n');
 					if (xaction == F("list")) Command_ExpandedCommandsList();
 					else if (xaction == F("mcutype")) Command_MCUType();
+					FlowSerialWrite(0x15);  // Send ACK
 				}
 				break;
-				case 'N': Command_DeviceName(); break;
-				case 'I': Command_UniqueId(); break;
-				case '8': Command_SetBaudrate(); break;
-				case 'J': Command_ButtonsCount(); break;
-				case '2': Command_TM1638Count(); break;
-				case 'B': Command_SimpleModulesCount(); break;
-				case 'A': Command_Acq(); break;
-				case 'G': Command_GearData(); break;
-				case 'P': Command_CustomProtocolData(); break;
-				default:
-					break;
+			case 'N': Command_DeviceName(); FlowSerialWrite(0x15); break;
+			case 'I': Command_UniqueId(); FlowSerialWrite(0x15); break;
+			case '8': Command_SetBaudrate(); break;
+			case 'J': Command_ButtonsCount(); break;
+			case '2': Command_TM1638Count(); break;
+			case 'B': Command_SimpleModulesCount(); break;
+			case 'A': Command_Acq(); break;
+			case 'G': Command_GearData(); break;
+			case 'P': 
+				debugLog("[main.loop] Processing telemetry data (P command)");
+				Command_CustomProtocolData(); 
+				debugLog("[main.loop] Telemetry processed");
+				break;
+			default:
+				break;
 			}
 		}
 	}
