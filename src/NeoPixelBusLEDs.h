@@ -14,7 +14,7 @@
  ************************** */
 
 // Number of LEDs in your strip
-#define LED_COUNT 24
+#define LED_COUNT 21
 // Set to 1 to reverse LED order (right to left)
 #define RIGHTTOLEFT 0
 // Set to 1 to light up all LEDs in red at startup (test mode)
@@ -218,5 +218,212 @@ void neoPixelBusShow() {
 
 int neoPixelBusCount() {
     return LED_COUNT;
+}
+
+/*************************
+ * Custom LED Logic for WT32-SC01 Plus
+ * 21 LEDs total:
+ * - LEDs 0-2 (1-3): Left side - Flags/Alerts/Spotter Left
+ * - LEDs 3-17 (4-18): Center - RPM meter (15 LEDs) with DRS indication
+ * - LEDs 18-20 (19-21): Right side - Spotter Right/Warnings
+ *************************/
+
+// LED position definitions (0-indexed)
+#define LED_LEFT_1 0
+#define LED_LEFT_2 1
+#define LED_LEFT_3 2
+#define LED_RPM_START 3
+#define LED_RPM_END 17
+#define LED_RPM_COUNT 15
+#define LED_RIGHT_1 18
+#define LED_RIGHT_2 19
+#define LED_RIGHT_3 20
+
+// Color definitions for flags and alerts
+#define COLOR_FLAG_GREEN RgbColor(0, 255, 0)
+#define COLOR_FLAG_YELLOW RgbColor(255, 255, 0)
+#define COLOR_FLAG_RED RgbColor(255, 0, 0)
+#define COLOR_FLAG_BLUE RgbColor(0, 0, 255)
+#define COLOR_FLAG_WHITE RgbColor(255, 255, 255)
+#define COLOR_FLAG_CHECKERED RgbColor(200, 200, 200)
+#define COLOR_FLAG_BLACK RgbColor(50, 50, 50)
+#define COLOR_ALERT_CRITICAL RgbColor(255, 0, 0)
+#define COLOR_ALERT_WARNING RgbColor(255, 100, 0)
+#define COLOR_SPOTTER RgbColor(255, 0, 255)  // Magenta for spotter
+#define COLOR_DRS_AVAILABLE RgbColor(0, 255, 0)  // Green when DRS available
+#define COLOR_DRS_ACTIVE RgbColor(0, 200, 255)   // Cyan when DRS active
+#define COLOR_RPM_LOW RgbColor(0, 255, 0)        // Green for low RPM
+#define COLOR_RPM_MID RgbColor(255, 255, 0)      // Yellow for mid RPM
+#define COLOR_RPM_HIGH RgbColor(255, 50, 0)      // Orange for high RPM
+#define COLOR_RPM_REDLINE RgbColor(255, 0, 0)    // Red for redline
+#define COLOR_OFF RgbColor(0, 0, 0)
+
+/**
+ * Update LEDs based on telemetry data
+ * Called from SHCustomProtocol with telemetry values
+ */
+void updateCustomLEDs(
+    int rpmPercent,              // RPM percentage (0-100)
+    int rpmRedLine,              // RPM redline setting (0-100)
+    String currentFlag,          // Current flag state
+    String spotterLeft,          // Spotter left (0/1)
+    String spotterRight,         // Spotter right (0/1)
+    String drsAvailable,         // DRS available (0/1)
+    String drsActive,            // DRS active (0/1)
+    String alertMessage,         // Critical alert message
+    bool shiftLightTrigger       // Shift light trigger
+) {
+    // Clear all LEDs first
+    for (int i = 0; i < LED_COUNT; i++) {
+        neoLedStrip.SetPixelColor(i, COLOR_OFF);
+    }
+
+    // === LEFT SIDE LEDs (0-2): FLAGS & ALERTS ===
+    RgbColor flagColor = COLOR_OFF;
+    bool flagBlink = false;
+    
+    // Determine flag color
+    if (currentFlag == "Green" || currentFlag == "GREEN") {
+        flagColor = COLOR_FLAG_GREEN;
+    } else if (currentFlag == "Yellow" || currentFlag == "YELLOW") {
+        flagColor = COLOR_FLAG_YELLOW;
+        flagBlink = true;
+    } else if (currentFlag == "Red" || currentFlag == "RED") {
+        flagColor = COLOR_FLAG_RED;
+    } else if (currentFlag == "Blue" || currentFlag == "BLUE") {
+        flagColor = COLOR_FLAG_BLUE;
+    } else if (currentFlag == "White" || currentFlag == "WHITE") {
+        flagColor = COLOR_FLAG_WHITE;
+    } else if (currentFlag == "Checkered" || currentFlag == "CHECKERED") {
+        flagColor = COLOR_FLAG_CHECKERED;
+        flagBlink = true;
+    } else if (currentFlag == "Black" || currentFlag == "BLACK") {
+        flagColor = COLOR_FLAG_BLACK;
+    }
+    
+    // Apply flag color to left LEDs
+    if (flagColor.R > 0 || flagColor.G > 0 || flagColor.B > 0) {
+        // For blinking flags (yellow, checkered), use millis() to create blink effect
+        bool show = true;
+        if (flagBlink) {
+            show = (millis() / 500) % 2 == 0;  // Blink every 500ms
+        }
+        
+        if (show) {
+            neoLedStrip.SetPixelColor(LED_LEFT_1, flagColor);
+            neoLedStrip.SetPixelColor(LED_LEFT_2, flagColor);
+            neoLedStrip.SetPixelColor(LED_LEFT_3, flagColor);
+        }
+    }
+    
+    // Override with spotter left if car detected
+    if (spotterLeft == "1") {
+        neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_SPOTTER);
+        neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_SPOTTER);
+        neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_SPOTTER);
+    }
+    
+    // Override with critical alerts (highest priority)
+    if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
+        bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
+        if (alertBlink) {
+            neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_ALERT_CRITICAL);
+            neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_ALERT_CRITICAL);
+            neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_ALERT_CRITICAL);
+        }
+    }
+
+    // === CENTER LEDs (3-17): RPM METER with DRS ===
+    int numLedsToLight = 0;
+    
+    // Calculate how many LEDs to light based on RPM
+    if (rpmPercent > 0) {
+        numLedsToLight = (rpmPercent * LED_RPM_COUNT) / 100;
+        if (numLedsToLight > LED_RPM_COUNT) numLedsToLight = LED_RPM_COUNT;
+    }
+    
+    // Determine if DRS is available or active
+    bool hasDRS = (drsAvailable == "1" || drsActive == "1");
+    RgbColor drsColor = (drsActive == "1") ? COLOR_DRS_ACTIVE : COLOR_DRS_AVAILABLE;
+    
+    // Light up RPM LEDs with progressive colors
+    for (int i = 0; i < LED_RPM_COUNT; i++) {
+        if (i < numLedsToLight) {
+            int ledIndex = LED_RPM_START + i;
+            RgbColor ledColor;
+            
+            // Calculate RPM segment percentage
+            float segmentPercent = ((float)(i + 1) / LED_RPM_COUNT) * 100.0;
+            
+            // Choose color based on RPM segment
+            if (hasDRS) {
+                // If DRS available/active, show DRS color
+                ledColor = drsColor;
+            } else if (segmentPercent < 60) {
+                // Low RPM - Green
+                ledColor = COLOR_RPM_LOW;
+            } else if (segmentPercent < 80) {
+                // Mid RPM - Yellow
+                ledColor = COLOR_RPM_MID;
+            } else if (segmentPercent < rpmRedLine) {
+                // High RPM - Orange
+                ledColor = COLOR_RPM_HIGH;
+            } else {
+                // Redline - Red (flashing if shift light triggered)
+                if (shiftLightTrigger && (millis() / 100) % 2 == 0) {
+                    ledColor = COLOR_OFF;  // Flash off
+                } else {
+                    ledColor = COLOR_RPM_REDLINE;
+                }
+            }
+            
+            neoLedStrip.SetPixelColor(ledIndex, ledColor);
+        }
+    }
+
+    // === RIGHT SIDE LEDs (18-20): FLAGS, ALERTS & SPOTTER RIGHT ===
+    // Apply flag color to right LEDs (same as left side)
+    if (flagColor.R > 0 || flagColor.G > 0 || flagColor.B > 0) {
+        bool show = true;
+        if (flagBlink) {
+            show = (millis() / 500) % 2 == 0;  // Blink every 500ms
+        }
+        
+        if (show) {
+            neoLedStrip.SetPixelColor(LED_RIGHT_1, flagColor);
+            neoLedStrip.SetPixelColor(LED_RIGHT_2, flagColor);
+            neoLedStrip.SetPixelColor(LED_RIGHT_3, flagColor);
+        }
+    }
+    
+    // Show shift light on right LEDs if triggered (lower priority than flags)
+    if (shiftLightTrigger) {
+        bool shiftBlink = (millis() / 100) % 2 == 0;
+        if (shiftBlink) {
+            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_RPM_REDLINE);
+            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_RPM_REDLINE);
+            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_RPM_REDLINE);
+        }
+    }
+    
+    // Override with spotter right if car detected (higher priority)
+    if (spotterRight == "1") {
+        neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_SPOTTER);
+        neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_SPOTTER);
+        neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_SPOTTER);
+    }
+    
+    // Override with critical alerts (highest priority - same as left side)
+    if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
+        bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
+        if (alertBlink) {
+            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_ALERT_CRITICAL);
+            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_ALERT_CRITICAL);
+            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_ALERT_CRITICAL);
+        }
+    }
+
+    // Update the strip
+    neoPixelBusShow();
 }
 

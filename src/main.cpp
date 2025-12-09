@@ -38,12 +38,13 @@ FullLoopbackStream incomingStream;
 // FlowSerial uses default Serial (USB CDC)
 
 #include <FlowSerialRead.h>
-#include <SHCustomProtocol.h>
 
 #ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
 // Configure it here!
 #include <NeoPixelBusLEDs.h>
 #endif
+
+#include <SHCustomProtocol.h>
 
 SHCustomProtocol shCustomProtocol;
 char loop_opt;

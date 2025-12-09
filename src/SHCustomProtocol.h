@@ -850,6 +850,21 @@ public:
 		
 		// Draw page indicator at bottom
 		drawPageIndicator();
+		
+		// Update LED strip with current telemetry data
+		#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+		updateCustomLEDs(
+			rpmPercent,
+			rpmRedLineSetting,
+			currentFlag,
+			spotterLeft,
+			spotterRight,
+			drsAvailable,
+			drsActive,
+			alertMessage,
+			shiftLightTrigger == "1"
+		);
+		#endif
 	}
 	
 	void drawPageIndicator() {
