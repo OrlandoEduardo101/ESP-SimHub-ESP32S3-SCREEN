@@ -868,46 +868,33 @@ public:
 	}
 	
 	void drawRacePageContent() {
-		// Original dashboard content
+		// Original dashboard content - LAYOUT CLÁSSICO
 		drawRpmMeter(0, 0, SCREEN_WIDTH, CELL_HEIGHT);
 		// this takes 2 cells in height, hence CELL_HEIGHT is the half point
 		drawGear(COL[2] + HALF_CELL_WIDTH, ROW[1] + CELL_HEIGHT);
 
-		// First Column (Lap times + Position)
+		// First+Second Column (Lap times)
 		drawCell(COL[0], ROW[1], bestLapTime, "bestLapTime", "Best Lap", "left");
 		drawCell(COL[0], ROW[2], lastLapTime, "lastLapTime", "Last Lap", "left");
 		drawCell(COL[0], ROW[3], currentLapTime, "currenLapTime", "Current Lap", "left", lapInvalidated == "True" ? RED : WHITE);
-		// NEW: Position
-		drawCell(COL[0], ROW[4], position + "/" + opponentsCount, "position", "POS", "left", WHITE);
 
-		// Second Column (Speed + Gaps)
-		drawCell(COL[2], ROW[2], speed, "speed", "Speed", "center");
-		// NEW: Gaps to adjacent drivers
-		drawCell(COL[2], ROW[3], driverAheadGap, "driverAheadGap", "Gap+", "center", WHITE);
-		drawCell(COL[2], ROW[4], driverBehindGap, "driverBehindGap", "Gap-", "center", WHITE);
+		// Third Column (speed) - ROW[3] para dar mais espaço ao gear
+		drawCell(COL[2], ROW[3], speed, "speed", "Speed", "center");
 
-		// Third Column (delta)
+		// Fourth+Fifth Column (delta)
 		drawCell(SCREEN_WIDTH, ROW[1], sessionBestLiveDeltaSeconds, "sessionBestLiveDeltaSeconds", "Delta", "right", sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
 		drawCell(SCREEN_WIDTH, ROW[2], sessionBestLiveDeltaProgressSeconds, "sessionBestLiveDeltaProgressSeconds", "Delta P", "right", sessionBestLiveDeltaProgressSeconds.indexOf('-') >= 0 ? GREEN : RED);
-		
-		// NEW: Combustível
-		drawCell(SCREEN_WIDTH, ROW[3], fuelRemainingLaps, "fuelRemainingLaps", "Fuel L", "right", fuelRemainingLaps.toFloat() < 2 ? RED : WHITE);
-		// NEW: DRS
-		uint16_t drsColor = WHITE;
-		if (drsActive == "1") drsColor = BLUE;
-		else if (drsAvailable == "1") drsColor = GREEN;
-		drawCell(SCREEN_WIDTH, ROW[4], drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "CLOSED"), "drsStatus", "DRS", "right", drsColor);
 
 		// Bottom row (TC, ABS, BB)
 		if (isTCCutNull == "False") {
 			drawCell(COL[0], ROW[4], tcTcCut, "tcTcCut", "TC TC2", "center", YELLOW);
 		} else {
-			drawCell(COL[1], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
+			drawCell(COL[0], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
 		}
 		drawCell(COL[1], ROW[4], absLevel, "absLevel", "ABS", "center", BLUE);
 		drawCell(COL[2], ROW[4], brakeBias, "brakeBias", "BB", "center", MAGENTA);
 
-		// Tyre pressure (unchanged)
+		// Tyre pressure
 		drawCell(COL[3], ROW[3], tyrePressureFrontLeft, "tyrePressureFrontLeft", "FL", "center", CYAN);
 		drawCell(COL[4], ROW[3], tyrePressureFrontRight, "tyrePressureFrontRight", "FR", "center", CYAN);
 		drawCell(COL[3], ROW[4], tyrePressureRearLeft, "tyrePressureRearLeft", "RL", "center", CYAN);
@@ -1270,52 +1257,93 @@ public:
 	}
 	
 	void drawRelativePageContent() {
-		// PAGE 4: Relative/Head-to-Head Comparison (full width)
+		// PAGE 4: Position, Gaps, Fuel & DRS - DADOS ESTRATÉGICOS
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
 		gfx->setTextColor(YELLOW);
 		gfx->setTextSize(2);
 		gfx->setCursor(10, 12);
-		gfx->print("HEAD TO HEAD");
+		gfx->print("STRATEGY");
 		
-		// Driver ahead - Top box
-		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 80, MAGENTA);
-		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, MAGENTA);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 58);
-		gfx->print("DRIVER AHEAD");
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 80);
-		gfx->print("Position: --");
-		gfx->setCursor(10, 95);
-		gfx->print("Gap: " + driverAheadGap + "s");
-		gfx->setCursor(10, 110);
-		gfx->print("Last: 01:35.74");
-		
-		// YOU - Middle box (highlighted)
-		gfx->drawRect(5, 140, SCREEN_WIDTH - 10, 80, CYAN);
-		gfx->fillRect(5, 140, SCREEN_WIDTH - 10, 25, CYAN);
+		// Position Box - Top
+		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 50, WHITE);
+		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
 		gfx->setTextColor(BLACK);
 		gfx->setTextSize(2);
-		gfx->setCursor(10, 145);
-		gfx->print(">>> YOU <<<");
-		gfx->setTextColor(CYAN);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 175);
-		gfx->print("Position: " + position);
-		gfx->setCursor(10, 190);
-		gfx->print("Last: " + lastLapTime);
-		gfx->setCursor(10, 205);
-		gfx->print("Current: " + currentLapTime);
+		gfx->setCursor(10, 57);
+		gfx->print("POSITION");
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(3);
+		gfx->setCursor(20, 75);
+		gfx->print(position + "/" + opponentsCount);
 		
-		// Driver behind - Bottom box
-		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, ORANGE);
-		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, ORANGE);
+		// Gap+ Box (Driver Ahead)
+		gfx->drawRect(5, 110, (SCREEN_WIDTH - 15) / 2, 50, MAGENTA);
+		gfx->fillRect(5, 110, (SCREEN_WIDTH - 15) / 2, 25, MAGENTA);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 117);
+		gfx->print("GAP TO AHEAD");
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(2);
+		gfx->setCursor(15, 135);
+		gfx->print(driverAheadGap);
+		
+		// Gap- Box (Driver Behind)
+		int halfWidth = (SCREEN_WIDTH - 15) / 2;
+		gfx->drawRect(10 + halfWidth, 110, halfWidth, 50, ORANGE);
+		gfx->fillRect(10 + halfWidth, 110, halfWidth, 25, ORANGE);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(15 + halfWidth, 117);
+		gfx->print("GAP TO BEHIND");
+		gfx->setTextColor(ORANGE);
+		gfx->setTextSize(2);
+		gfx->setCursor(20 + halfWidth, 135);
+		gfx->print(driverBehindGap);
+		
+		// Fuel Box
+		gfx->drawRect(5, 170, (SCREEN_WIDTH - 15) / 2, 50, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
+		gfx->fillRect(5, 170, (SCREEN_WIDTH - 15) / 2, 25, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(10, 177);
+		gfx->print("FUEL LAPS");
+		gfx->setTextColor(fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
+		gfx->setTextSize(2);
+		gfx->setCursor(15, 195);
+		gfx->print(fuelRemainingLaps);
+		
+		// DRS Box
+		uint16_t drsColor = WHITE;
+		String drsText = "CLOSED";
+		if (drsActive == "1") {
+			drsColor = BLUE;
+			drsText = "OPEN";
+		} else if (drsAvailable == "1") {
+			drsColor = GREEN;
+			drsText = "AVAIL";
+		}
+		gfx->drawRect(10 + halfWidth, 170, halfWidth, 50, drsColor);
+		gfx->fillRect(10 + halfWidth, 170, halfWidth, 25, drsColor);
+		gfx->setTextColor(BLACK);
+		gfx->setTextSize(1);
+		gfx->setCursor(15 + halfWidth, 177);
+		gfx->print("DRS STATUS");
+		gfx->setTextColor(drsColor);
+		gfx->setTextSize(2);
+		gfx->setCursor(20 + halfWidth, 195);
+		gfx->print(drsText);
+		
+		// Fuel consumption info at bottom
+		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, CYAN);
+		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, CYAN);
 		gfx->setTextColor(BLACK);
 		gfx->setTextSize(1);
 		gfx->setCursor(10, 237);
-		gfx->print("DRIVER BEHIND: Gap " + driverBehindGap + "s");
+		gfx->print("Fuel/Lap: " + fuelLitersPerLap + " L");
+		gfx->setTextColor(CYAN);
+		gfx->setCursor(10, 250);
+		gfx->print("Time left: " + sessionTimeLeft);
 	}
 	
 	void drawLeaderboardPageContent() {
