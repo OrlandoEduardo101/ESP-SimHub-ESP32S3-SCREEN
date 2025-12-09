@@ -280,7 +280,8 @@ private:
 		// Calculate space needed for text (estimate ~40 pixels)
 		int textAreaHeight = 50;  // Space reserved for loading text
 		int availableHeight = SCREEN_HEIGHT - textAreaHeight;
-		int logoY = (availableHeight - LOGO_HEIGHT) / 2;  // Center in available area
+		// int logoY = (availableHeight - LOGO_HEIGHT) / 2;  // Center in available area
+		int logoY = ((availableHeight - LOGO_HEIGHT) / 2) + 12;
 
 		// Draw the logo image centered, preserving transparency
 		// Pixels with value 0x0000 (black) are treated as transparent and skipped
@@ -1568,6 +1569,38 @@ public:
 		return false;
 	}
 	
+	// Remove "LEVEL" suffix from alert text for cleaner display
+	String cleanAlertText(const String &text) {
+		String result = text;
+		String upper = text;
+		upper.toUpperCase();
+		
+		// Remove " LEVEL" if present (case insensitive)
+		// int idx = upper.lastIndexOf(" LEVEL");
+		// if (idx >= 0) {
+		// 	result = result.substring(0, idx);
+		// }
+
+		if (result.indexOf('LEVEL') >= 0) {
+			// Replace ": " with "\n" to put value on new line
+			result.replace(" LEVEL", "");
+		}
+
+		if (result.indexOf('FLAG') >= 0) {
+			// Replace ": " with "\n" to put value on new line
+			result.replace(" FLAG", "");
+		}
+		
+		// // Format "TC: 3" or "ABS: 5" as "TC\n3" or "ABS\n5" (label on first line, value on second)
+		// // This improves readability with large text
+		if (result.indexOf(':') >= 0) {
+			// Replace ": " with "\n" to put value on new line
+			result.replace(": ", "\n\n");
+		}
+		
+		return result;
+	}
+	
 	// Draw alerts/flags in the center of the screen
 	void drawAlert() {
 		if (!canUseDisplay()) return;
@@ -1596,7 +1629,7 @@ public:
 			isValidAlertString(alertUpper)) {
 			shouldShowAlert = true;
 			alertStartTime = millis();
-			alertText = alertNormalized;
+			alertText = cleanAlertText(alertNormalized);
 			
 			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
 				bgColor = RGB565(20, 20, 20);
@@ -1629,7 +1662,7 @@ public:
 			alertText.length() == 0) {
 			shouldShowAlert = true;
 			alertStartTime = millis();
-			alertText = popupNormalized;
+			alertText = cleanAlertText(popupNormalized);
 			bgColor = RGB565(50, 50, 100);  // Dark blue background
 			textColor = YELLOW;
 		}
@@ -1703,34 +1736,94 @@ public:
 			textColor = WHITE;
 		}
 		
-		// Alert box dimensions (keep consistent for clear/draw)
-		int alertWidth = 240;
-		int alertHeight = 120;
-		int alertX = (SCREEN_WIDTH - alertWidth) / 2;
-		int alertY = (SCREEN_HEIGHT - alertHeight) / 2;
-		
 		// Check if alert should still be displayed (3 second duration)
-		bool showingNow = shouldShowAlert || (millis() - alertStartTime) < ALERT_DURATION_MS;
+		// If a new alert was triggered, reset the timer
+		unsigned long elapsedTime = millis() - alertStartTime;
+		bool showingNow = (elapsedTime < ALERT_DURATION_MS) && (alertText.length() > 0);
 		
 		if (showingNow) {
-			if (alertText.length() > 0) {
-				// Draw background box
-				gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgColor);
-				gfx->drawRect(alertX, alertY, alertWidth, alertHeight, WHITE);
-				
-				// Draw text
-				gfx->setTextColor(textColor);
-				gfx->setTextSize(2);
-				int16_t x1, y1;
-				uint16_t w, h;
-				gfx->getTextBounds(alertText, 0, 0, &x1, &y1, &w, &h);
-				int textX = alertX + (alertWidth - w) / 2;
-				int textY = alertY + (alertHeight - h) / 2;
-				gfx->setCursor(textX, textY);
-				gfx->print(alertText);
-				alertWasShowing = true;  // Mark that alert is active
-			}
-		} else if (alertWasShowing) {
+            if (alertText.length() > 0) {
+                // ... (código anterior de contagem de linhas igual) ...
+                int lineCount = 1;
+                for (int i = 0; i < alertText.length(); i++) {
+                    if (alertText[i] == '\n') lineCount++;
+                }
+                
+                int lineHeight = 50;
+                int totalTextHeight = lineHeight * lineCount;
+                
+                // --- AJUSTE DE POSICIONAMENTO ---
+                
+                // 1. Defina a altura da sua barra de telemetria (chutei 50px pela foto)
+                int bottomBarHeight = 0; 
+                
+                // 2. A altura disponível para o alerta é a tela inteira MENOS a barra
+                int availableScreenHeight = SCREEN_HEIGHT - bottomBarHeight;
+
+                // 3. Ajustei a altura do box para ser menor que a área disponível
+                // (280 era muito grande, deixei 260 para ter respiro em cima e embaixo)
+                int alertHeight = 260; 
+                
+                int alertWidth = SCREEN_WIDTH;
+                int alertX = 0;
+                
+                // 4. O cálculo do Y agora é baseado na availableScreenHeight
+                int alertY = ((availableScreenHeight - alertHeight) / 2)+30;
+                
+                // --- FIM DO AJUSTE ---
+
+                // Desenha o fundo
+                gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgColor);
+                
+                gfx->setTextColor(textColor);
+                gfx->setTextSize(6); // Mantive grande
+                
+                int16_t x1, y1;
+                uint16_t w, h;
+                
+                // Centraliza o texto dentro do novo box menor
+                // Adicionei um ajuste (-5) para correção visual da fonte
+                int currentY = alertY + (alertHeight - totalTextHeight) / 2 - 5;
+                
+                String remainingText = alertText;
+                
+                while (remainingText.length() > 0) {
+                    // ... (lógica de quebra de linha igual ao anterior) ...
+                    int newlinePos = remainingText.indexOf('\n');
+                    String line;
+                    if (newlinePos >= 0) {
+                        line = remainingText.substring(0, newlinePos);
+                        remainingText = remainingText.substring(newlinePos + 1);
+                    } else {
+                        line = remainingText;
+                        remainingText = "";
+                    }
+                    
+                    gfx->getTextBounds(line, 0, 0, &x1, &y1, &w, &h);
+                    int centerX = (SCREEN_WIDTH - w) / 2;
+                    
+                    // --- EFEITO NEGRITO (FAUX BOLD) ---
+                    // Imprime 3 vezes com leve deslocamento para engrossar a letra
+                    
+                    // 1. Camada mais grossa (deslocada 2px)
+                    gfx->setCursor(centerX + 2, currentY);
+                    gfx->print(line);
+
+                    // 2. Camada intermediária (deslocada 1px)
+                    gfx->setCursor(centerX + 1, currentY);
+                    gfx->print(line);
+
+                    // 3. Camada principal (posição original)
+                    gfx->setCursor(centerX, currentY);
+                    gfx->print(line);
+                    // ----------------------------------
+                    
+                    currentY += lineHeight;
+                }
+                
+                alertWasShowing = true;
+            }
+        } else if (alertWasShowing) {
 			// Alert just expired - set flag to trigger full redraw in next draw() cycle
 			alertWasShowing = false;
 			needsFullRedraw = true;
