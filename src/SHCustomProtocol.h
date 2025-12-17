@@ -129,12 +129,13 @@ private:
 	String tyrePressureFrontRight = "00.0";
 	String tyrePressureRearLeft = "00.0";
 	String tyrePressureRearRight = "00.0";
+	String oilTemperature = "0";
+	String waterTemperature = "0";
 	String tcLevel = "0";
 	String tcActive = "0";
 	String absLevel = "0";
 	String absActive = "0";
-	String isTCCutNull = "True";
-	String tcTcCut = "0  0";
+	String isTCCutNull = "0";
 	String brakeBias = "0";
 	String brake = "0";
 	String lapInvalidated = "False";
@@ -583,18 +584,24 @@ public:
 		String brakeTemperatureRearLeft = FlowSerialReadStringUntil(';');
 		String brakeTemperatureRearRight = FlowSerialReadStringUntil(';');
 		// Motor
-		String oilTemperature = FlowSerialReadStringUntil(';');
-		String waterTemperature = FlowSerialReadStringUntil(';');
+		oilTemperature = FlowSerialReadStringUntil(';');
+		waterTemperature = FlowSerialReadStringUntil(';');
 
 		// BLOCO 4: Eletrônica (índices 25-31)
 		tcLevel = FlowSerialReadStringUntil(';');
 		tcActive = FlowSerialReadStringUntil(';');
 		absLevel = FlowSerialReadStringUntil(';');
 		absActive = FlowSerialReadStringUntil(';');
-		isTCCutNull = FlowSerialReadStringUntil(';');
-		tcTcCut = FlowSerialReadStringUntil(';');
-		brakeBias = FlowSerialReadStringUntil(';');
-		brake = FlowSerialReadStringUntil(';');
+		isTCCutNull = FlowSerialReadStringUntil(';');  // [29] TCCut (0 or 1)
+		brakeBias = FlowSerialReadStringUntil(';');    // [30] BrakeBias (e.g., 68.0)
+		brake = FlowSerialReadStringUntil(';');        // [31] Brake pedal (0-100)
+		
+		// Validate brakeBias (should be between 0-100)
+		brakeBias.trim();
+		float brakeBiasVal = brakeBias.toFloat();
+		if (brakeBiasVal < 0 || brakeBiasVal > 100 || brakeBias.length() == 0) {
+			brakeBias = "60.0";  // Default to 60.0 if invalid
+		}
 
 		// BLOCO 5: Estratégia (índices 32-41)
 		position = FlowSerialReadStringUntil(';');
@@ -655,7 +662,7 @@ public:
 		drsAvailable = FlowSerialReadStringUntil(';');
 		drsActive = FlowSerialReadStringUntil(';');
 		kersLevel = FlowSerialReadStringUntil(';');
-		turboBoost = FlowSerialReadStringUntil('\n');  // Último campo (índice 61)
+		turboBoost = FlowSerialReadStringUntil(';');  // Último campo (índice 61)
 
 		// Build raw packet log (indices 0-61)
 		String rawPacket; rawPacket.reserve(512);
@@ -690,7 +697,6 @@ public:
 		appendField(absLevel);
 		appendField(absActive);
 		appendField(isTCCutNull);
-		appendField(tcTcCut);
 		appendField(brakeBias);
 		appendField(brake);
 		appendField(position);
@@ -810,6 +816,10 @@ public:
 		}
 		
 		if (!hasReceivedData) {
+			// Show loading animation on LEDs while waiting for SimHub
+			#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+			updateLoadingAnimation();
+			#endif
 			return;
 		}
 		
@@ -881,10 +891,123 @@ public:
 			gfx->fillCircle(startX + (i * dotSpacing), startY, dotRadius, color);
 		}
 	}
+
+	void drawStatusBar() {
+		if (!gfx) return;
+
+		// Clear the entire top row to avoid any residual text/artifacts
+		// gfx->fillRect(0, ROW[0], SCREEN_WIDTH, CELL_HEIGHT, BLACK);
+
+		// Build list of items to show (max 5)
+		struct StatusItem {
+			String value;
+			String label;
+			String cacheKey;
+			uint16_t color;
+		};
+		StatusItem items[5];
+		int itemCount = 0;
+		
+		// 1. Position (always first)
+		items[itemCount++] = {
+			position,
+			"POS",
+			"statusPos",
+			YELLOW
+		};
+		
+		// 2. Fuel (always second)
+		float fuelLaps = fuelRemainingLaps.toFloat();
+		String fuelDisplay = String(fuelLaps, 1) + "L";  // Format with 1 decimal place + " L"
+		items[itemCount++] = {
+			fuelDisplay,
+			"FUEL",
+			"statusFuel",
+			fuelLaps < 3.0f ? RED : WHITE
+		};
+		
+		// 3. KERS if hybrid (priority)
+		int kersVal = kersLevel.toInt();
+		bool hasKers = (kersVal > 0);
+		if (hasKers && itemCount < 5) {
+			items[itemCount++] = {
+				kersLevel,
+				"KERS",
+				"statusKers",
+				kersVal < 20 ? RED : GREEN
+			};
+		}
+		
+		// 4. Oil if critical OR space available
+		int oilTempVal = oilTemperature.toInt();
+		bool oilCritical = (oilTempVal > 110);
+		if (itemCount < 5 && (oilCritical || !hasKers)) {
+			items[itemCount++] = {
+				oilTemperature,
+				"OIL",
+				"statusOil",
+				oilCritical ? RED : ORANGE
+			};
+		}
+		
+		// 5. Fill remaining slots (turbo > water > gap)
+		if (itemCount < 5) {
+			// Try turbo first - only if string is not empty AND value is meaningful
+			String turboTrimmed = turboBoost;
+			turboTrimmed.trim();
+			float turboVal = turboTrimmed.toFloat();
+			if (turboTrimmed.length() > 0 && turboVal > 0.1) {
+				items[itemCount++] = {
+					turboBoost,
+					"TURBO",
+					"statusTurbo",
+					CYAN
+				};
+			}
+			// Then water (only if turbo not shown)
+			else if (!oilCritical) {
+				int waterTempVal = waterTemperature.toInt();
+				if (waterTempVal > 0) {
+					items[itemCount++] = {
+						waterTemperature,
+						"WATER",
+						"statusWater",
+						waterTempVal > 100 ? RED : CYAN
+					};
+				}
+			}
+		}
+		
+		// 6. Last slot: gap if space
+		if (itemCount < 5 && driverAheadGap.length() > 0 && driverAheadGap != "--") {
+			items[itemCount++] = {
+				driverAheadGap,
+				"GAP",
+				"statusGap",
+				WHITE
+			};
+		}
+		
+		// Clear unused columns if itemCount < 5
+		// for (int i = itemCount; i < 5; i++) {
+		// 	gfx->fillRect(COL[i], ROW[0], CELL_WIDTH, CELL_HEIGHT, BLACK);
+		// }
+		
+		// Draw only collected items (itemCount is accurate)
+		for (int i = 0; i < itemCount; i++) {
+			drawCell(COL[i], ROW[0], items[i].value, items[i].cacheKey, items[i].label, "center", items[i].color);
+		}
+	}
 	
 	void drawRacePageContent() {
+		// Reset cursor and text state to prevent drawing artifacts
+		gfx->setCursor(0, 0);
+		gfx->setTextColor(WHITE, BLACK);
+		
 		// Original dashboard content - LAYOUT CLÁSSICO
-		drawRpmMeter(0, 0, SCREEN_WIDTH, CELL_HEIGHT);
+		// drawRpmMeter(0, 0, SCREEN_WIDTH, CELL_HEIGHT);
+		drawStatusBar();
+
 		// this takes 2 cells in height, hence CELL_HEIGHT is the half point
 		drawGear(COL[2] + HALF_CELL_WIDTH, ROW[1] + CELL_HEIGHT);
 
@@ -901,8 +1024,9 @@ public:
 		drawCell(SCREEN_WIDTH, ROW[2], sessionBestLiveDeltaProgressSeconds, "sessionBestLiveDeltaProgressSeconds", "Delta P", "right", sessionBestLiveDeltaProgressSeconds.indexOf('-') >= 0 ? GREEN : RED);
 
 		// Bottom row (TC, ABS, BB)
-		if (isTCCutNull == "False") {
-			drawCell(COL[0], ROW[4], tcTcCut, "tcTcCut", "TC TC2", "center", YELLOW);
+		// If TCCut is active (non-zero), show CUT indicator; otherwise show TC level
+		if (isTCCutNull != "0") {
+			drawCell(COL[0], ROW[4], String("CUT"), "tcCut", "TC", "center", YELLOW);
 		} else {
 			drawCell(COL[0], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
 		}
@@ -1044,10 +1168,10 @@ public:
 		gfx->setTextColor(CYAN);
 		gfx->setCursor(10, 230);
 		gfx->print("FL: ");
-		gfx->println(tyrePressureFrontLeft);
+		gfx->print(tyrePressureFrontLeft);
 		gfx->setCursor(10, 245);
 		gfx->print("RL: ");
-		gfx->println(tyrePressureRearLeft);
+		gfx->print(tyrePressureRearLeft);
 		
 		gfx->drawRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 65, CYAN);
 		gfx->fillRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 20, CYAN);
@@ -1058,10 +1182,10 @@ public:
 		gfx->setTextColor(CYAN);
 		gfx->setCursor(10 + tyreBoxWidth + 5, 230);
 		gfx->print("FR: ");
-		gfx->println(tyrePressureFrontRight);
+		gfx->print(tyrePressureFrontRight);
 		gfx->setCursor(10 + tyreBoxWidth + 5, 245);
 		gfx->print("RR: ");
-		gfx->println(tyrePressureRearRight);
+		gfx->print(tyrePressureRearRight);
 	}
 	
 	void drawAdvancedTelemetryPage() {
@@ -1605,6 +1729,14 @@ public:
 			upper == "FINISHED" || upper == "RED FLAG") {
 			return true;
 		}
+		// Accept control-change popups even without values
+		// Examples: "BIAS", "TC LEVEL", "ABS LEVEL", "MAP"
+		if (upper == "BIAS" || upper.startsWith("BIAS") ||
+			upper.indexOf("TC LEVEL") >= 0 ||
+			upper.indexOf("ABS LEVEL") >= 0 ||
+			upper.indexOf("MAP") >= 0) {
+			return true;
+		}
 		// Check for pop-up messages (contain colon for labels)
 		if (upper.indexOf(':') > 0) {
 			return true;
@@ -1686,6 +1818,9 @@ public:
 			} else if (alertUpper.indexOf("BLUE FLAG") >= 0) {
 				bgColor = BLUE;
 				textColor = WHITE;
+			} else if (alertUpper.indexOf("GREEN FLAG") >= 0 || alertUpper.indexOf("GREEN") >= 0) {
+				bgColor = GREEN;  // Pure green RGB565
+				textColor = BLACK;
 			} else if (alertUpper.indexOf("LOW FUEL") >= 0) {
 				bgColor = RED;
 				textColor = YELLOW;
@@ -1700,14 +1835,36 @@ public:
 		if (popupUpper.length() > 0 && 
 			popupUpper != "NORMAL" && 
 			popupUpper != "NONE" && 
-			popupUpper != "0" && 
-			isValidAlertString(popupUpper) &&
-			alertText.length() == 0) {
+			popupUpper != "0") {
+			// Override any existing alert for control changes (ABS/TC/BIAS/MAP)
+			// Popups are short-lived and should take precedence over flags
 			shouldShowAlert = true;
 			alertStartTime = millis();
 			alertText = cleanAlertText(popupNormalized);
-			bgColor = RGB565(50, 50, 100);  // Dark blue background
-			textColor = YELLOW;
+			
+			// Check for flag messages in popup
+			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
+				bgColor = RGB565(20, 20, 20);
+				textColor = RED;
+			} else if (alertUpper.indexOf("PIT LIMITER") >= 0) {
+				bgColor = ORANGE;
+				textColor = BLACK;
+			} else if (alertUpper.indexOf("YELLOW FLAG") >= 0) {
+				bgColor = YELLOW;
+				textColor = BLACK;
+			} else if (alertUpper.indexOf("BLUE FLAG") >= 0) {
+				bgColor = BLUE;
+				textColor = WHITE;
+			} else if (alertUpper.indexOf("GREEN FLAG") >= 0 || alertUpper.indexOf("GREEN") >= 0) {
+				bgColor = GREEN;  // Pure green RGB565
+				textColor = BLACK;
+			} else if (alertUpper.indexOf("LOW FUEL") >= 0) {
+				bgColor = RED;
+				textColor = YELLOW;
+			} else {
+				bgColor = RGB565(50, 50, 100);  // Dark blue background
+				textColor = YELLOW;
+			}
 		}
 		
 		// Check for flag changes - TODAS AS BANDEIRAS SUPORTADAS
@@ -1752,7 +1909,8 @@ public:
 			// 🟢 Green Flag
 			else if (flagValue.equalsIgnoreCase("Green")) {
 				alertText = "GREEN FLAG";
-				bgColor = GREEN;
+				// bgColor = BLUE;
+				bgColor = GREEN;  // Pure green RGB565 (R=0, G=31, B=0)
 				textColor = BLACK;
 			} 
 			// 🏁 Checkered Flag (Finished)

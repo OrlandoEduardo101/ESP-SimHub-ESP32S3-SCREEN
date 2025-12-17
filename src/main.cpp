@@ -179,6 +179,26 @@ void setup(void)
 	screenLog("Display init OK");
 	debugLog("Display init OK");
 	
+	// Initialize NeoPixel LED strip
+	#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+	Serial.println(">>> [STEP 1] About to init NeoPixel LEDs...");
+	Serial.flush();
+	debugLog(">>> [STEP 1] About to init NeoPixel LEDs...");
+	delay(100);
+	
+	Serial.println(">>> [STEP 2] Calling neoPixelBusBegin()...");
+	Serial.flush();
+	debugLog(">>> [STEP 2] Calling neoPixelBusBegin()...");
+	delay(100);
+	
+	neoPixelBusBegin();
+	
+	Serial.println(">>> [STEP 3] neoPixelBusBegin() returned successfully");
+	Serial.flush();
+	debugLog(">>> [STEP 3] neoPixelBusBegin() returned successfully");
+	screenLog("LEDs init OK");
+	#endif
+	
 	Serial.println(">>> Setup complete!");
 	debugLog(">>> Setup complete!");
 	Serial.println("========================================\n");

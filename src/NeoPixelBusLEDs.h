@@ -7,6 +7,9 @@
 #include <NeoPixelBusLg.h>
 #include <string>
 
+// Forward declaration for debugLog
+extern void debugLog(const String &msg);
+
 /****************************
  *
  * Configuration Starts here
@@ -27,7 +30,7 @@
 //  remember, if you don't have an external power supply, your board or USB may not be able
 //  to provide enough power.
 // luminance goes from 0-255, UPDATE AT YOUR OWN RISK
-#define LUMINANCE_LIMIT 150
+#define LUMINANCE_LIMIT 30  // Adjust brightness 10-60 as needed
 
 
 // The color order that your LED strip uses
@@ -61,7 +64,7 @@
 //******
 #define method NeoEsp32BitBangWs2812xMethod
 // Use GPIO 10 (EXT_IO1) or GPIO 11 (EXT_IO2) - GPIO 10 recommended
-#define DATA_PIN 10
+#define DATA_PIN 10  // Connected to EXT_IO1 (pin 3) on Extended IO Interface
 #else
 //******
 // RMT for ESP32 (non-S3)
@@ -114,18 +117,145 @@ NeoPixelBusLg<colorSpec, method, NeoGammaTableMethod> neoLedStrip(LED_COUNT, DAT
  */
 void neoPixelBusBegin()
 {
+    // ===== STAGE 0: Entry point =====
+    debugLog("[LED] ============================================");
+    debugLog("[LED] STAGE 0: === neoPixelBusBegin() STARTED ===");
+    debugLog("[LED] ============================================");
+    delay(50);
+    
+    // ===== STAGE 1: Configuration dump =====
+    debugLog("[LED] STAGE 1: Configuration parameters");
+    debugLog("[LED]   LED_COUNT = " + String(LED_COUNT));
+    debugLog("[LED]   DATA_PIN = " + String(DATA_PIN));
+    debugLog("[LED]   LUMINANCE_LIMIT = " + String(LUMINANCE_LIMIT));
+    debugLog("[LED]   TEST_MODE = " + String(TEST_MODE));
+    delay(50);
+    
+    // ===== STAGE 2: Call Begin() =====
+    debugLog("[LED] STAGE 2: Calling neoLedStrip.Begin()...");
+    delay(50);
+    
     neoLedStrip.Begin();
+    
+    debugLog("[LED]   ✓ neoLedStrip.Begin() RETURNED OK");
+    delay(50);
+    
+    // ===== STAGE 3: Initial Show() =====
+    debugLog("[LED] STAGE 3: Calling neoLedStrip.Show()...");
+    delay(50);
+    
     neoLedStrip.Show();
+    
+    debugLog("[LED]   ✓ neoLedStrip.Show() RETURNED OK");
+    delay(50);
 
+    // ===== STAGE 4: TEST MODE SEQUENCE =====
     if (TEST_MODE)
     {
-        for (int i = 0; i < LED_COUNT; i++)
-        {
-            neoLedStrip.SetPixelColor(i, initialColor);
+        debugLog("[LED] STAGE 4: TEST_MODE ENABLED");
+        debugLog("[LED]   Starting 5-color test sequence...");
+        delay(100);
+        
+        // Reduce brightness temporarily for boot test
+        neoLedStrip.SetLuminance(30);  // Test sequence brightness
+        
+        // ===== TEST 1: RED =====
+        debugLog("[LED] STAGE 4.1: TEST 1 - Setting all LEDs to RED");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(255, 0, 0));
         }
+        debugLog("[LED]   SetPixelColor() loop completed");
+        delay(30);
+        
+        debugLog("[LED]   Calling Show() for RED...");
         neoLedStrip.Show();
+        debugLog("[LED]   ✓ RED color is ON - waiting 1000ms");
+        delay(1000);
+        
+        // ===== TEST 2: GREEN =====
+        debugLog("[LED] STAGE 4.2: TEST 2 - Setting all LEDs to GREEN");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(0, 255, 0));
+        }
+        debugLog("[LED]   SetPixelColor() loop completed");
+        delay(30);
+        
+        debugLog("[LED]   Calling Show() for GREEN...");
+        neoLedStrip.Show();
+        debugLog("[LED]   ✓ GREEN color is ON - waiting 1000ms");
+        delay(1000);
+        
+        // ===== TEST 3: BLUE =====
+        debugLog("[LED] STAGE 4.3: TEST 3 - Setting all LEDs to BLUE");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(0, 0, 255));
+        }
+        debugLog("[LED]   SetPixelColor() loop completed");
+        delay(30);
+        
+        debugLog("[LED]   Calling Show() for BLUE...");
+        neoLedStrip.Show();
+        debugLog("[LED]   ✓ BLUE color is ON - waiting 1000ms");
+        delay(1000);
+        
+        // ===== TEST 4: WHITE =====
+        debugLog("[LED] STAGE 4.4: TEST 4 - Setting all LEDs to WHITE");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(255, 255, 255));
+        }
+        debugLog("[LED]   SetPixelColor() loop completed");
+        delay(30);
+        
+        debugLog("[LED]   Calling Show() for WHITE...");
+        neoLedStrip.Show();
+        debugLog("[LED]   ✓ WHITE color is ON - waiting 1000ms");
+        delay(1000);
+        
+        // ===== TEST 5: Progressive (one by one) =====
+        debugLog("[LED] STAGE 4.5: TEST 5 - Progressive YELLOW (LED by LED)");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(255, 255, 0)); // Yellow
+            neoLedStrip.Show();
+            debugLog("[LED]   LED #" + String(i) + " is ON");
+            delay(100);
+        }
+        debugLog("[LED]   ✓ All 21 LEDs are YELLOW - waiting 500ms");
+        delay(500);
+        
+        // ===== TEST 6: Clear all =====
+        debugLog("[LED] STAGE 4.6: TEST 6 - Clearing all LEDs");
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, RgbColor(0, 0, 0));
+        }
+        debugLog("[LED]   SetPixelColor() loop completed");
+        delay(30);
+        
+        debugLog("[LED]   Calling Show() to turn OFF all LEDs...");
+        neoLedStrip.Show();
+        debugLog("[LED]   ✓ All LEDs are OFF");
+        delay(100);
+        
+        debugLog("[LED] STAGE 4: TEST_MODE sequence COMPLETED");
     }
+    else
+    {
+        debugLog("[LED] STAGE 4: TEST_MODE DISABLED - Skipping tests");
+    }
+    
+    // ===== STAGE 5: Set luminance =====
+    debugLog("[LED] STAGE 5: Setting luminance...");
+    delay(50);
+    
     neoLedStrip.SetLuminance(LUMINANCE_LIMIT);
+    
+    debugLog("[LED]   ✓ Luminance set to: " + String(LUMINANCE_LIMIT));
+    delay(50);
+    
+    // ===== STAGE 6: Final summary =====
+    debugLog("[LED] ============================================");
+    debugLog("[LED] STAGE 6: === neoPixelBusBegin() COMPLETED ===");
+    debugLog("[LED]           All LED initialization OK!");
+    debugLog("[LED] ============================================");
 }
 
 void neoPixelBusRead()
@@ -257,6 +387,104 @@ int neoPixelBusCount() {
 #define COLOR_RPM_HIGH RgbColor(255, 50, 0)      // Orange for high RPM
 #define COLOR_RPM_REDLINE RgbColor(255, 0, 0)    // Red for redline
 #define COLOR_OFF RgbColor(0, 0, 0)
+
+/**
+ * Loading animation - displays random patterns while waiting for SimHub connection
+ * Call this repeatedly in the main loop when SimHub is not connected
+ */
+void updateLoadingAnimation() {
+    static unsigned long lastUpdate = 0;
+    static int animationMode = 0;
+    static int animationStep = 0;
+    
+    unsigned long currentMillis = millis();
+    
+    // Change animation mode every 3 seconds
+    if (currentMillis - lastUpdate > 100) {  // Update every 100ms
+        lastUpdate = currentMillis;
+        animationStep++;
+        
+        // Switch animation every 30 steps (3 seconds)
+        if (animationStep >= 30) {
+            animationStep = 0;
+            animationMode = (animationMode + 1) % 5;  // 5 different animations
+        }
+        
+        // Clear all LEDs
+        for (int i = 0; i < LED_COUNT; i++) {
+            neoLedStrip.SetPixelColor(i, COLOR_OFF);
+        }
+        
+        switch (animationMode) {
+            case 0: {
+                // Knight Rider style - bouncing LED
+                int pos = animationStep;
+                if (pos >= LED_COUNT) {
+                    pos = (LED_COUNT * 2 - 2) - pos;
+                }
+                if (pos < LED_COUNT) {
+                    neoLedStrip.SetPixelColor(pos, RgbColor(255, 0, 0));
+                    if (pos > 0) neoLedStrip.SetPixelColor(pos - 1, RgbColor(80, 0, 0));
+                    if (pos < LED_COUNT - 1) neoLedStrip.SetPixelColor(pos + 1, RgbColor(80, 0, 0));
+                }
+                break;
+            }
+            
+            case 1: {
+                // Rainbow chase
+                for (int i = 0; i < LED_COUNT; i++) {
+                    int hue = (i * 255 / LED_COUNT + animationStep * 8) % 256;
+                    // Simple HSV to RGB conversion for rainbow
+                    if (hue < 85) {
+                        neoLedStrip.SetPixelColor(i, RgbColor(hue * 3, 255 - hue * 3, 0));
+                    } else if (hue < 170) {
+                        hue -= 85;
+                        neoLedStrip.SetPixelColor(i, RgbColor(255 - hue * 3, 0, hue * 3));
+                    } else {
+                        hue -= 170;
+                        neoLedStrip.SetPixelColor(i, RgbColor(0, hue * 3, 255 - hue * 3));
+                    }
+                }
+                break;
+            }
+            
+            case 2: {
+                // Center out pulse
+                int center = LED_COUNT / 2;
+                int radius = animationStep % (LED_COUNT / 2);
+                if (radius == 0) radius = 1;  // Prevent division by zero
+                for (int i = 0; i < LED_COUNT; i++) {
+                    if (abs(i - center) <= radius) {
+                        int brightness = 255 - (abs(i - center) * 255 / radius);
+                        neoLedStrip.SetPixelColor(i, RgbColor(0, brightness, 255));
+                    }
+                }
+                break;
+            }
+            
+            case 3: {
+                // Theatre chase
+                for (int i = 0; i < LED_COUNT; i++) {
+                    if ((i + animationStep) % 3 == 0) {
+                        neoLedStrip.SetPixelColor(i, RgbColor(255, 255, 0));
+                    }
+                }
+                break;
+            }
+            
+            case 4: {
+                // Random sparkle
+                for (int i = 0; i < 5; i++) {  // 5 random LEDs
+                    int pos = random(LED_COUNT);
+                    neoLedStrip.SetPixelColor(pos, RgbColor(random(128, 255), random(128, 255), random(128, 255)));
+                }
+                break;
+            }
+        }
+        
+        neoPixelBusShow();
+    }
+}
 
 /**
  * Update LEDs based on telemetry data
