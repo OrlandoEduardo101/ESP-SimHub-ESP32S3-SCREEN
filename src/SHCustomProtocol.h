@@ -872,7 +872,9 @@ public:
 			drsAvailable,
 			drsActive,
 			alertMessage,
-			shiftLightTrigger == "1"
+			shiftLightTrigger == "1",
+			tcActive,
+			absActive
 		);
 		#endif
 	}

@@ -380,6 +380,8 @@ int neoPixelBusCount() {
 #define COLOR_ALERT_CRITICAL RgbColor(255, 0, 0)
 #define COLOR_ALERT_WARNING RgbColor(255, 100, 0)
 #define COLOR_SPOTTER RgbColor(255, 0, 255)  // Magenta for spotter
+#define COLOR_TC_ACTIVE RgbColor(255, 200, 0)  // Orange/Yellow for TC cutting power
+#define COLOR_ABS_ACTIVE RgbColor(255, 100, 0)  // Orange for ABS cutting brake
 #define COLOR_DRS_AVAILABLE RgbColor(0, 255, 0)  // Green when DRS available
 #define COLOR_DRS_ACTIVE RgbColor(0, 200, 255)   // Cyan when DRS active
 #define COLOR_RPM_LOW RgbColor(0, 255, 0)        // Green for low RPM
@@ -499,7 +501,9 @@ void updateCustomLEDs(
     String drsAvailable,         // DRS available (0/1)
     String drsActive,            // DRS active (0/1)
     String alertMessage,         // Critical alert message
-    bool shiftLightTrigger       // Shift light trigger
+    bool shiftLightTrigger,      // Shift light trigger
+    String tcActive,             // TC actively cutting power (0/1)
+    String absActive             // ABS actively cutting brake (0/1)
 ) {
     // Clear all LEDs first
     for (int i = 0; i < LED_COUNT; i++) {
@@ -549,6 +553,16 @@ void updateCustomLEDs(
         neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_SPOTTER);
+    }
+    
+    // Override with TC active indicator (traction control cutting power)
+    if (tcActive == "1") {
+        bool tcBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
+        if (tcBlink) {
+            neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_TC_ACTIVE);
+            neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_TC_ACTIVE);
+            neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_TC_ACTIVE);
+        }
     }
     
     // Override with critical alerts (highest priority)
@@ -639,6 +653,16 @@ void updateCustomLEDs(
         neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_SPOTTER);
+    }
+    
+    // Override with ABS active indicator (ABS cutting brake pressure)
+    if (absActive == "1") {
+        bool absBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
+        if (absBlink) {
+            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_ABS_ACTIVE);
+            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_ABS_ACTIVE);
+            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_ABS_ACTIVE);
+        }
     }
     
     // Override with critical alerts (highest priority - same as left side)
