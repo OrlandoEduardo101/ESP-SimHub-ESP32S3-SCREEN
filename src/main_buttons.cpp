@@ -73,8 +73,8 @@ struct EncoderPins {
 
 const EncoderPins encoderPins[NUM_ENCODERS] = {
     {11, 12},  // Encoder 1: GP11/GP12
-    {13, 38},  // Encoder 2: GP13/GP38 (troca p/ evitar solda difícil em 14)
-    {39, 40},  // Encoder 3: GP39/GP40 (troca p/ evitar solda difícil em 15/16)
+    {13, 38},  // Encoder 2: GP13/GP38
+    {40, 41},  // Encoder 3: GP40/GP41 (ajustado para espaçamento melhor)
     {17, 18}   // Encoder 4: GP17/GP18
 };
 
