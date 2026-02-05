@@ -1,0 +1,84 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .num { font-family: Arial, sans-serif; font-size: 4px; font-weight: bold; text-anchor: middle; }
+      .abbr { font-family: Arial, sans-serif; font-size: 3px; font-weight: normal; text-anchor: middle; }
+      .center { fill: #222; stroke: #000; stroke-width: 0.5; }
+    </style>
+  </defs>
+
+  <!-- Background branco -->
+  <circle cx="50" cy="50" r="48" fill="white" stroke="#000" stroke-width="1.5"/>
+
+  <!-- Segmentos coloridos (15 slots x 24° cada) -->
+  <!-- 1. CLUTCH (azul) -->
+  <path d="M 50,50 L 50,3 A 47,47 0 0,1 69.1,7 Z" fill="#4169E1" stroke="#000" stroke-width="0.5"/>
+  <!-- 2. CALIB (azul) -->
+  <path d="M 50,50 L 69.1,7 A 47,47 0 0,1 85,18.6 Z" fill="#4169E1" stroke="#000" stroke-width="0.5"/>
+  <!-- 3. ENC (azul) -->
+  <path d="M 50,50 L 85,18.6 A 47,47 0 0,1 94.7,35.5 Z" fill="#4169E1" stroke="#000" stroke-width="0.5"/>
+  <!-- 4. RST (azul) -->
+  <path d="M 50,50 L 94.7,35.5 A 47,47 0 0,1 95.8,56 Z" fill="#4169E1" stroke="#000" stroke-width="0.5"/>
+  <!-- 5. BITE (amarelo) -->
+  <path d="M 50,50 L 95.8,56 A 47,47 0 0,1 90.7,73.5 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 6. BRIGHT (amarelo) -->
+  <path d="M 50,50 L 90.7,73.5 A 47,47 0 0,1 77.6,88.1 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 7. PAGE (amarelo) -->
+  <path d="M 50,50 L 77.6,88.1 A 47,47 0 0,1 60.4,96 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 8. VOL_SYS (amarelo) -->
+  <path d="M 50,50 L 60.4,96 A 47,47 0 0,1 41,96.4 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 9. VOL_A (amarelo) -->
+  <path d="M 50,50 L 41,96.4 A 47,47 0 0,1 22.4,88.1 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 10. VOL_B (amarelo) -->
+  <path d="M 50,50 L 22.4,88.1 A 47,47 0 0,1 9.3,73.5 Z" fill="#FFD700" stroke="#000" stroke-width="0.5"/>
+  <!-- 11. TC2 (naranja) -->
+  <path d="M 50,50 L 9.3,73.5 A 47,47 0 0,1 4.2,56 Z" fill="#FF9933" stroke="#000" stroke-width="0.5"/>
+  <!-- 12. TC3 (naranja) -->
+  <path d="M 50,50 L 4.2,56 A 47,47 0 0,1 5.3,35.5 Z" fill="#FF9933" stroke="#000" stroke-width="0.5"/>
+  <!-- 13. TYRE (naranja) -->
+  <path d="M 50,50 L 5.3,35.5 A 47,47 0 0,1 15,18.6 Z" fill="#FF9933" stroke="#000" stroke-width="0.5"/>
+  <!-- 14. ERS (verde) -->
+  <path d="M 50,50 L 15,18.6 A 47,47 0 0,1 30.9,7 Z" fill="#00AA00" stroke="#000" stroke-width="0.5"/>
+  <!-- 15. FUEL (roxo) -->
+  <path d="M 50,50 L 30.9,7 A 47,47 0 0,1 50,3 Z" fill="#9933FF" stroke="#000" stroke-width="0.5"/>
+
+  <!-- Números 1-15 (raio 32, ângulos no meio de cada segmento) -->
+  <text x="56" y="19" class="num">1</text>
+  <text x="69" y="24" class="num">2</text>
+  <text x="78" y="34" class="num">3</text>
+  <text x="82" y="47" class="num">4</text>
+  <text x="80" y="60" class="num">5</text>
+  <text x="74" y="71" class="num">6</text>
+  <text x="63" y="79" class="num">7</text>
+  <text x="50" y="82" class="num">8</text>
+  <text x="37" y="79" class="num">9</text>
+  <text x="26" y="71" class="num">10</text>
+  <text x="20" y="60" class="num">11</text>
+  <text x="18" y="47" class="num">12</text>
+  <text x="22" y="34" class="num">13</text>
+  <text x="31" y="24" class="num">14</text>
+  <text x="44" y="19" class="num">15</text>
+
+  <!-- Abreviações (raio 20, ângulos no meio de cada segmento) -->
+  <text x="56" y="15" class="abbr">CLU</text>
+  <text x="65" y="17" class="abbr">CAL</text>
+  <text x="73" y="23" class="abbr">ENC</text>
+  <text x="77" y="33" class="abbr">RST</text>
+  <text x="76" y="45" class="abbr">BTE</text>
+  <text x="70" y="57" class="abbr">BRT</text>
+  <text x="60" y="67" class="abbr">PAG</text>
+  <text x="50" y="72" class="abbr">VOL</text>
+  <text x="40" y="67" class="abbr">VA</text>
+  <text x="30" y="57" class="abbr">VB</text>
+  <text x="24" y="45" class="abbr">TC2</text>
+  <text x="23" y="33" class="abbr">TC3</text>
+  <text x="27" y="23" class="abbr">TYR</text>
+  <text x="23" y="17" class="abbr">ERS</text>
+  <text x="35" y="11" class="abbr">FUEL</text>
+
+  <!-- Círculo central escuro -->
+  <circle cx="50" cy="50" r="7" class="center"/>
+
+  <!-- Indicador de posição (seta no topo) -->
+  <polygon points="50,2 48,7 52,7" fill="#E74C3C" stroke="#000" stroke-width="0.4"/>
+</svg>

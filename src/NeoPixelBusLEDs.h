@@ -110,6 +110,7 @@ auto initialColor = RgbColor(120, 0, 0);
 
 // Instantiate an LED Strip
 NeoPixelBusLg<colorSpec, method, NeoGammaTableMethod> neoLedStrip(LED_COUNT, DATA_PIN);
+static uint8_t neoPixelBusLuminance = LUMINANCE_LIMIT;
 
 
 /**
@@ -122,7 +123,7 @@ void neoPixelBusBegin()
     debugLog("[LED] STAGE 0: === neoPixelBusBegin() STARTED ===");
     debugLog("[LED] ============================================");
     delay(50);
-    
+
     // ===== STAGE 1: Configuration dump =====
     debugLog("[LED] STAGE 1: Configuration parameters");
     debugLog("[LED]   LED_COUNT = " + String(LED_COUNT));
@@ -130,22 +131,22 @@ void neoPixelBusBegin()
     debugLog("[LED]   LUMINANCE_LIMIT = " + String(LUMINANCE_LIMIT));
     debugLog("[LED]   TEST_MODE = " + String(TEST_MODE));
     delay(50);
-    
+
     // ===== STAGE 2: Call Begin() =====
     debugLog("[LED] STAGE 2: Calling neoLedStrip.Begin()...");
     delay(50);
-    
+
     neoLedStrip.Begin();
-    
+
     debugLog("[LED]   ✓ neoLedStrip.Begin() RETURNED OK");
     delay(50);
-    
+
     // ===== STAGE 3: Initial Show() =====
     debugLog("[LED] STAGE 3: Calling neoLedStrip.Show()...");
     delay(50);
-    
+
     neoLedStrip.Show();
-    
+
     debugLog("[LED]   ✓ neoLedStrip.Show() RETURNED OK");
     delay(50);
 
@@ -155,10 +156,10 @@ void neoPixelBusBegin()
         debugLog("[LED] STAGE 4: TEST_MODE ENABLED");
         debugLog("[LED]   Starting 5-color test sequence...");
         delay(100);
-        
+
         // Reduce brightness temporarily for boot test
         neoLedStrip.SetLuminance(30);  // Test sequence brightness
-        
+
         // ===== TEST 1: RED =====
         debugLog("[LED] STAGE 4.1: TEST 1 - Setting all LEDs to RED");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -166,12 +167,12 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
-        
+
         debugLog("[LED]   Calling Show() for RED...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ RED color is ON - waiting 1000ms");
         delay(1000);
-        
+
         // ===== TEST 2: GREEN =====
         debugLog("[LED] STAGE 4.2: TEST 2 - Setting all LEDs to GREEN");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -179,12 +180,12 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
-        
+
         debugLog("[LED]   Calling Show() for GREEN...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ GREEN color is ON - waiting 1000ms");
         delay(1000);
-        
+
         // ===== TEST 3: BLUE =====
         debugLog("[LED] STAGE 4.3: TEST 3 - Setting all LEDs to BLUE");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -192,12 +193,12 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
-        
+
         debugLog("[LED]   Calling Show() for BLUE...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ BLUE color is ON - waiting 1000ms");
         delay(1000);
-        
+
         // ===== TEST 4: WHITE =====
         debugLog("[LED] STAGE 4.4: TEST 4 - Setting all LEDs to WHITE");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -205,12 +206,12 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
-        
+
         debugLog("[LED]   Calling Show() for WHITE...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ WHITE color is ON - waiting 1000ms");
         delay(1000);
-        
+
         // ===== TEST 5: Progressive (one by one) =====
         debugLog("[LED] STAGE 4.5: TEST 5 - Progressive YELLOW (LED by LED)");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -221,7 +222,7 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   ✓ All 21 LEDs are YELLOW - waiting 500ms");
         delay(500);
-        
+
         // ===== TEST 6: Clear all =====
         debugLog("[LED] STAGE 4.6: TEST 6 - Clearing all LEDs");
         for (int i = 0; i < LED_COUNT; i++) {
@@ -229,28 +230,29 @@ void neoPixelBusBegin()
         }
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
-        
+
         debugLog("[LED]   Calling Show() to turn OFF all LEDs...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ All LEDs are OFF");
         delay(100);
-        
+
         debugLog("[LED] STAGE 4: TEST_MODE sequence COMPLETED");
     }
     else
     {
         debugLog("[LED] STAGE 4: TEST_MODE DISABLED - Skipping tests");
     }
-    
+
     // ===== STAGE 5: Set luminance =====
     debugLog("[LED] STAGE 5: Setting luminance...");
     delay(50);
-    
-    neoLedStrip.SetLuminance(LUMINANCE_LIMIT);
-    
+
+    neoPixelBusLuminance = LUMINANCE_LIMIT;
+    neoLedStrip.SetLuminance(neoPixelBusLuminance);
+
     debugLog("[LED]   ✓ Luminance set to: " + String(LUMINANCE_LIMIT));
     delay(50);
-    
+
     // ===== STAGE 6: Final summary =====
     debugLog("[LED] ============================================");
     debugLog("[LED] STAGE 6: === neoPixelBusBegin() COMPLETED ===");
@@ -350,6 +352,16 @@ int neoPixelBusCount() {
     return LED_COUNT;
 }
 
+void neoPixelBusSetLuminance(uint8_t value) {
+    neoPixelBusLuminance = value;
+    neoLedStrip.SetLuminance(neoPixelBusLuminance);
+    neoPixelBusShow();
+}
+
+uint8_t neoPixelBusGetLuminance() {
+    return neoPixelBusLuminance;
+}
+
 /*************************
  * Custom LED Logic for WT32-SC01 Plus
  * 21 LEDs total:
@@ -398,25 +410,25 @@ void updateLoadingAnimation() {
     static unsigned long lastUpdate = 0;
     static int animationMode = 0;
     static int animationStep = 0;
-    
+
     unsigned long currentMillis = millis();
-    
+
     // Change animation mode every 3 seconds
     if (currentMillis - lastUpdate > 100) {  // Update every 100ms
         lastUpdate = currentMillis;
         animationStep++;
-        
+
         // Switch animation every 30 steps (3 seconds)
         if (animationStep >= 30) {
             animationStep = 0;
             animationMode = (animationMode + 1) % 5;  // 5 different animations
         }
-        
+
         // Clear all LEDs
         for (int i = 0; i < LED_COUNT; i++) {
             neoLedStrip.SetPixelColor(i, COLOR_OFF);
         }
-        
+
         switch (animationMode) {
             case 0: {
                 // Knight Rider style - bouncing LED
@@ -431,7 +443,7 @@ void updateLoadingAnimation() {
                 }
                 break;
             }
-            
+
             case 1: {
                 // Rainbow chase
                 for (int i = 0; i < LED_COUNT; i++) {
@@ -449,7 +461,7 @@ void updateLoadingAnimation() {
                 }
                 break;
             }
-            
+
             case 2: {
                 // Center out pulse
                 int center = LED_COUNT / 2;
@@ -463,7 +475,7 @@ void updateLoadingAnimation() {
                 }
                 break;
             }
-            
+
             case 3: {
                 // Theatre chase
                 for (int i = 0; i < LED_COUNT; i++) {
@@ -473,7 +485,7 @@ void updateLoadingAnimation() {
                 }
                 break;
             }
-            
+
             case 4: {
                 // Random sparkle
                 for (int i = 0; i < 5; i++) {  // 5 random LEDs
@@ -483,7 +495,7 @@ void updateLoadingAnimation() {
                 break;
             }
         }
-        
+
         neoPixelBusShow();
     }
 }
@@ -513,7 +525,7 @@ void updateCustomLEDs(
     // === LEFT SIDE LEDs (0-2): FLAGS & ALERTS ===
     RgbColor flagColor = COLOR_OFF;
     bool flagBlink = false;
-    
+
     // Determine flag color
     if (currentFlag == "Green" || currentFlag == "GREEN") {
         flagColor = COLOR_FLAG_GREEN;
@@ -532,7 +544,7 @@ void updateCustomLEDs(
     } else if (currentFlag == "Black" || currentFlag == "BLACK") {
         flagColor = COLOR_FLAG_BLACK;
     }
-    
+
     // Apply flag color to left LEDs
     if (flagColor.R > 0 || flagColor.G > 0 || flagColor.B > 0) {
         // For blinking flags (yellow, checkered), use millis() to create blink effect
@@ -540,21 +552,21 @@ void updateCustomLEDs(
         if (flagBlink) {
             show = (millis() / 500) % 2 == 0;  // Blink every 500ms
         }
-        
+
         if (show) {
             neoLedStrip.SetPixelColor(LED_LEFT_1, flagColor);
             neoLedStrip.SetPixelColor(LED_LEFT_2, flagColor);
             neoLedStrip.SetPixelColor(LED_LEFT_3, flagColor);
         }
     }
-    
+
     // Override with spotter left if car detected
     if (spotterLeft == "1") {
         neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_SPOTTER);
     }
-    
+
     // Override with TC active indicator (traction control cutting power)
     if (tcActive == "1") {
         bool tcBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
@@ -564,7 +576,7 @@ void updateCustomLEDs(
             neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_TC_ACTIVE);
         }
     }
-    
+
     // Override with critical alerts (highest priority)
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
@@ -577,26 +589,26 @@ void updateCustomLEDs(
 
     // === CENTER LEDs (3-17): RPM METER with DRS ===
     int numLedsToLight = 0;
-    
+
     // Calculate how many LEDs to light based on RPM
     if (rpmPercent > 0) {
         numLedsToLight = (rpmPercent * LED_RPM_COUNT) / 100;
         if (numLedsToLight > LED_RPM_COUNT) numLedsToLight = LED_RPM_COUNT;
     }
-    
+
     // Determine if DRS is available or active
     bool hasDRS = (drsAvailable == "1" || drsActive == "1");
     RgbColor drsColor = (drsActive == "1") ? COLOR_DRS_ACTIVE : COLOR_DRS_AVAILABLE;
-    
+
     // Light up RPM LEDs with progressive colors
     for (int i = 0; i < LED_RPM_COUNT; i++) {
         if (i < numLedsToLight) {
             int ledIndex = LED_RPM_START + i;
             RgbColor ledColor;
-            
+
             // Calculate RPM segment percentage
             float segmentPercent = ((float)(i + 1) / LED_RPM_COUNT) * 100.0;
-            
+
             // Choose color based on RPM segment
             if (hasDRS) {
                 // If DRS available/active, show DRS color
@@ -618,7 +630,7 @@ void updateCustomLEDs(
                     ledColor = COLOR_RPM_REDLINE;
                 }
             }
-            
+
             neoLedStrip.SetPixelColor(ledIndex, ledColor);
         }
     }
@@ -630,14 +642,14 @@ void updateCustomLEDs(
         if (flagBlink) {
             show = (millis() / 500) % 2 == 0;  // Blink every 500ms
         }
-        
+
         if (show) {
             neoLedStrip.SetPixelColor(LED_RIGHT_1, flagColor);
             neoLedStrip.SetPixelColor(LED_RIGHT_2, flagColor);
             neoLedStrip.SetPixelColor(LED_RIGHT_3, flagColor);
         }
     }
-    
+
     // Show shift light on right LEDs if triggered (lower priority than flags)
     if (shiftLightTrigger) {
         bool shiftBlink = (millis() / 100) % 2 == 0;
@@ -647,14 +659,14 @@ void updateCustomLEDs(
             neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_RPM_REDLINE);
         }
     }
-    
+
     // Override with spotter right if car detected (higher priority)
     if (spotterRight == "1") {
         neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_SPOTTER);
         neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_SPOTTER);
     }
-    
+
     // Override with ABS active indicator (ABS cutting brake pressure)
     if (absActive == "1") {
         bool absBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
@@ -664,7 +676,7 @@ void updateCustomLEDs(
             neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_ABS_ACTIVE);
         }
     }
-    
+
     // Override with critical alerts (highest priority - same as left side)
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts

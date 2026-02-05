@@ -1,0 +1,46 @@
+<svg width="60mm" height="70mm" viewBox="-200 -200 400 450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .num { font-family: Arial, sans-serif; font-size: 26px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle; }
+      .label-text { font-family: Arial, sans-serif; font-size: 24px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle; }
+    </style>
+
+    <path id="map-slice" d="M 0 -180 A 180 180 0 0 1 90 -155.8 L 45 -77.9 A 90 90 0 0 0 0 -90 Z" />
+  </defs>
+
+  <g transform="rotate(-15)"> <g transform="rotate(0)">   <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(30)">  <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(60)">  <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(90)">  <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(120)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(150)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(180)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(210)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(240)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(270)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(300)"> <use href="#map-slice" fill="#000"/></g>
+    <g transform="rotate(330)"> <use href="#map-slice" fill="#000"/></g>
+  </g>
+
+  <g>
+    <text class="num" transform="translate(0 -135)">12</text>
+    <text class="num" transform="rotate(30)  translate(0 -135) rotate(-30)">1</text>
+    <text class="num" transform="rotate(60)  translate(0 -135) rotate(-60)">2</text>
+    <text class="num" transform="rotate(90)  translate(0 -135) rotate(-90)">3</text>
+    <text class="num" transform="rotate(120) translate(0 -135) rotate(-120)">4</text>
+    <text class="num" transform="rotate(150) translate(0 -135) rotate(-150)">5</text>
+    <text class="num" transform="rotate(180) translate(0 -135) rotate(-180)">6</text>
+    <text class="num" transform="rotate(210) translate(0 -135) rotate(-210)">7</text>
+    <text class="num" transform="rotate(240) translate(0 -135) rotate(-240)">8</text>
+    <text class="num" transform="rotate(270) translate(0 -135) rotate(-270)">9</text>
+    <text class="num" transform="rotate(300) translate(0 -135) rotate(-300)">10</text>
+    <text class="num" transform="rotate(330) translate(0 -135) rotate(-330)">11</text>
+  </g>
+
+  <path d="M -70 140 Q 0 160 70 140 L 70 210 Q 0 230 -70 210 Z" fill="#000" />
+  <rect x="-60" y="155" width="120" height="50" rx="12" fill="#A61E01" stroke="#FFF" stroke-width="2" />
+  <text x="0" y="182" class="label-text">ABS</text>
+
+  <circle cx="0" cy="0" r="85" fill="#111" />
+  <polygon points="0,-185 8,-165 -8,-165" fill="#E74C3C" stroke="#000" stroke-width="1"/>
+</svg>

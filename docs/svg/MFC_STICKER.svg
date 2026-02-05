@@ -1,0 +1,32 @@
+<svg width="70mm" height="70mm" viewBox="-200 -200 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .label { font-family: Arial, sans-serif; font-size: 14px; font-weight: 900; fill: #000; text-anchor: middle; dominant-baseline: middle; }
+      .num { font-size: 10px; font-weight: bold; fill: rgba(0,0,0,0.6); }
+      .divider { stroke: #000; stroke-width: 1.2; }
+    </style>
+    <path id="slice" d="M 0 -180 A 180 180 0 0 1 73.7 -164.7 L 36.8 -82.3 A 90 90 0 0 0 0 -90 Z" />
+  </defs>
+
+  <g transform="rotate(0)"> <use href="#slice" fill="#2E86DE" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-12)"><tspan class="num" x="0" dy="-12">1</tspan><tspan x="0" dy="16">CLUT</tspan></text></g>
+  <g transform="rotate(24)"> <use href="#slice" fill="#2E86DE" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-36)"><tspan class="num" x="0" dy="-12">2</tspan><tspan x="0" dy="16">CALIB</tspan><tspan x="0" dy="12">HALL</tspan></text></g>
+  <g transform="rotate(48)"> <use href="#slice" fill="#2E86DE" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-60)"><tspan class="num" x="0" dy="-12">3</tspan><tspan x="0" dy="16">ENC</tspan><tspan x="0" dy="12">MODE</tspan></text> </g>
+  <g transform="rotate(72)"> <use href="#slice" fill="#2E86DE" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-84)"><tspan class="num" x="0" dy="-12">4</tspan><tspan x="0" dy="16">RST</tspan></text></g>
+
+  <g transform="rotate(96)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-108)"><tspan class="num" x="0" dy="-12">5</tspan><tspan x="0" dy="16">BITE</tspan></text></g>
+  <g transform="rotate(120)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-132)"><tspan class="num" x="0" dy="-12">6</tspan><tspan x="0" dy="16">BRT</tspan></text></g>
+  <g transform="rotate(144)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-156)"><tspan class="num" x="0" dy="-12">7</tspan><tspan x="0" dy="16">PAGE</tspan></text></g>
+  <g transform="rotate(168)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-180)"><tspan class="num" x="0" dy="-12">8</tspan><tspan x="0" dy="16">VOL</tspan><tspan x="0" dy="16">SYS</tspan></text></g>
+  <g transform="rotate(192)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-204)"><tspan class="num" x="0" dy="-12">9</tspan><tspan x="0" dy="16">VOL</tspan><tspan x="0" dy="16">A</tspan></text></g>
+  <g transform="rotate(216)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-228)"><tspan class="num" x="0" dy="-12">10</tspan><tspan x="0" dy="16">VOL</tspan><tspan x="0" dy="16">B</tspan></text></g>
+
+  <g transform="rotate(240)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-252)"><tspan class="num" x="0" dy="-12">11</tspan><tspan x="0" dy="16">TC 2</tspan></text></g>
+  <g transform="rotate(264)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-276)"><tspan class="num" x="0" dy="-12">12</tspan><tspan x="0" dy="16">TC 3</tspan></text></g>
+  <g transform="rotate(288)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-300)"><tspan class="num" x="0" dy="-12">13</tspan><tspan x="0" dy="16">TYRE</tspan></text></g>
+
+  <g transform="rotate(312)"> <use href="#slice" fill="#27AE60" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-324)"><tspan class="num" x="0" dy="-12">14</tspan><tspan x="0" dy="16">ERS</tspan></text></g>
+  <g transform="rotate(336)"> <use href="#slice" fill="#8E44AD" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-348)"><tspan class="num" x="0" dy="-12">15</tspan><tspan x="0" dy="16">FUEL</tspan></text></g>
+
+  <polygon points="0,-185 6,-170 -6,-170" fill="#E74C3C" stroke="#000" stroke-width="1"/>
+  <circle cx="0" cy="0" r="88" fill="#111" stroke="#000" stroke-width="2"/>
+</svg>

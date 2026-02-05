@@ -14,6 +14,11 @@ extern void screenLog(const String &msg);
 // Forward declaration for debugLog
 extern void debugLog(const String &msg);
 
+#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+void neoPixelBusSetLuminance(uint8_t value);
+uint8_t neoPixelBusGetLuminance();
+#endif
+
 // WT32-SC01 Plus - ST7796 via 8-bit MCU (8080) parallel interface (320x480)
 // IMPORTANT: WT32-SC01 Plus uses 8-bit parallel interface, NOT SPI!
 // Pinout according to official WT32-SC01 Plus documentation:
@@ -139,7 +144,7 @@ private:
 	String brakeBias = "0";
 	String brake = "0";
 	String lapInvalidated = "False";
-	
+
 	// Bloco 5: Estratégia (índices 32-41)
 	String position = "0";
 	String opponentsCount = "0";
@@ -148,7 +153,7 @@ private:
 	String fuelRemainingLaps = "0.0";
 	String fuelLitersPerLap = "0.00";
 	String sessionTimeLeft = "00:00:00";
-	
+
 	// Alert/Flag variables
 	String currentFlag = "None";
 	String prevFlag = "None";
@@ -161,6 +166,8 @@ private:
 	bool alertWasShowing = false;  // Track if alert was displayed to trigger clear
 	bool needsFullRedraw = false;  // Flag to trigger full screen redraw after alert
 	static const unsigned long ALERT_DURATION_MS = 3000;  // Show alert for 3 seconds
+	bool popupFromUart = false;
+	unsigned long popupFromUartUntil = 0;
 
 	// Bloco 7: Dados para Arduino LEDs (índices 44-47)
 	String rpmPercent2 = "0";  // [44] RPM % (repetido)
@@ -178,7 +185,7 @@ private:
 	String sector3Time = "00.000";
 	String airTemperature = "0";
 	String roadTemperature = "0";
-	
+
 	// Novos campos adicionados (índices 57-61)
 	String shiftLightTrigger = "0";  // [57] Shift light trigger (0/1)
 	String drsAvailable = "0";       // [58] DRS disponível (0/1)
@@ -191,11 +198,20 @@ private:
 	bool displayEnabled = true;  // Display enabled for dashboard
 	bool loadingScreenShown = false;  // Track if loading screen has been shown
 	bool touchInitAttempted = false;  // Track if we've already tried to init touch
-	
+
+	int backlightLevel = 220;  // 0-255
+	bool backlightPwmReady = false;
+	static const int BACKLIGHT_MIN = 15;
+	static const int BACKLIGHT_MAX = 255;
+	static const int BACKLIGHT_STEP = 15;
+	static const int BACKLIGHT_PWM_CHANNEL = 1;
+	static const int BACKLIGHT_PWM_FREQ = 5000;
+	static const int BACKLIGHT_PWM_RES = 8;
+
 	// Multi-page dashboard variables
-	enum DashboardPage { 
-		PAGE_RACE = 0, 
-		PAGE_TIMING = 1, 
+	enum DashboardPage {
+		PAGE_RACE = 0,
+		PAGE_TIMING = 1,
 		PAGE_TELEMETRY = 2,
 		PAGE_ADVANCED = 3,       // NEW: Advanced telemetry (Motor, Wear, Env, DRS, KERS, Turbo)
 		PAGE_RELATIVE = 4,       // NEW: Relative/Head-to-head
@@ -211,7 +227,22 @@ private:
 	bool canUseDisplay() {
 		return displayEnabled && gfx != nullptr;
 	}
-	
+
+	void applyBacklight() {
+		#ifdef TFT_BL
+		if (TFT_BL >= 0 && TFT_BL < 48) {
+			int level = backlightLevel;
+			if (level < BACKLIGHT_MIN) level = BACKLIGHT_MIN;
+			if (level > BACKLIGHT_MAX) level = BACKLIGHT_MAX;
+			if (backlightPwmReady) {
+				ledcWrite(BACKLIGHT_PWM_CHANNEL, level);
+			} else {
+				digitalWrite(TFT_BL, level > 0 ? HIGH : LOW);
+			}
+		}
+		#endif
+	}
+
 	// Reset draw cache when changing pages
 	void resetDrawCache() {
 		prev_gear = "";  // Force gear redraw
@@ -220,14 +251,14 @@ private:
 		prevData.clear();
 		prevColor.clear();
 	}
-	
+
 	// Navigate to next page
 	void nextPage() {
 		currentPage = (DashboardPage)((currentPage + 1) % 7);
 		gfx->fillScreen(BLACK);
 		resetDrawCache();
 	}
-	
+
 	// Navigate to previous page
 	void prevPage() {
 		currentPage = (DashboardPage)((currentPage - 1 + 7) % 7);
@@ -239,12 +270,12 @@ private:
 	TouchPoint readTouch() {
 		TouchPoint point = {0, 0, false};
 		if (!touchInitialized) return point;
-		
+
 		// Read FT6336U touch data from registers
 		Wire.beginTransmission(TOUCH_ADDRESS);
 		Wire.write(0x02);  // TD_STATUS register
 		Wire.endTransmission();
-		
+
 		Wire.requestFrom(TOUCH_ADDRESS, 5);  // Read 5 bytes: status + X high + X low + Y high + Y low
 		if (Wire.available() >= 5) {
 			uint8_t status = Wire.read();     // TD_STATUS (bit 0 = touch detected)
@@ -252,7 +283,7 @@ private:
 			uint8_t x_low = Wire.read();      // Touch X Low byte
 			uint8_t y_high = Wire.read();     // Touch Y High byte
 			uint8_t y_low = Wire.read();      // Touch Y Low byte
-			
+
 			// Only process if touch is detected (bit 0 set in status)
 			if (status & 0x01) {
 				// Extract coordinates - FT6336U stores X as 12-bit value
@@ -336,6 +367,53 @@ private:
 		loadingScreenShown = true;
 	}
 public:
+	void showPopup(const String &msg, uint32_t durationMs = 2000) {
+		popupMessage = msg;
+		popupFromUart = true;
+		popupFromUartUntil = millis() + durationMs;
+	}
+
+	void pageNextExternal() {
+		nextPage();
+	}
+
+	void pagePrevExternal() {
+		prevPage();
+	}
+
+	void adjustBacklight(int delta) {
+		setBacklight(backlightLevel + delta);
+	}
+
+	void setBacklight(int level) {
+		backlightLevel = level;
+		if (backlightLevel < BACKLIGHT_MIN) backlightLevel = BACKLIGHT_MIN;
+		if (backlightLevel > BACKLIGHT_MAX) backlightLevel = BACKLIGHT_MAX;
+		applyBacklight();
+	}
+
+	uint8_t getBacklightPercent() {
+		return (uint8_t)((backlightLevel * 100) / 255);
+	}
+
+	void adjustLedLuminance(int delta) {
+		#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+		int current = neoPixelBusGetLuminance();
+		int next = current + delta;
+		if (next < 1) next = 1;
+		if (next > 255) next = 255;
+		neoPixelBusSetLuminance((uint8_t)next);
+		#endif
+	}
+
+	uint8_t getLedLuminance() {
+		#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
+		return neoPixelBusGetLuminance();
+		#else
+		return 0;
+		#endif
+	}
+
 	void setup() {
 		// Initialize display for dashboard
 		displayEnabled = true;
@@ -368,6 +446,9 @@ public:
 			if (TFT_BL >= 0 && TFT_BL < 48) {  // ESP32-S3 has GPIOs 0-48
 				pinMode(TFT_BL, OUTPUT);
 				digitalWrite(TFT_BL, LOW);  // Start with backlight off
+				ledcSetup(BACKLIGHT_PWM_CHANNEL, BACKLIGHT_PWM_FREQ, BACKLIGHT_PWM_RES);
+				ledcAttachPin(TFT_BL, BACKLIGHT_PWM_CHANNEL);
+				backlightPwmReady = true;
 				delay(10);
 				Serial.print("Backlight pin configured: GPIO ");
 				Serial.println(TFT_BL);
@@ -409,7 +490,7 @@ public:
 				// Turn on backlight after display is ready
 		#ifdef TFT_BL
 				if (TFT_BL >= 0 && TFT_BL < 48) {
-					digitalWrite(TFT_BL, HIGH);
+					applyBacklight();
 					delay(100);
 					Serial.println("Backlight enabled");
 				}
@@ -429,7 +510,7 @@ public:
 			}
 		}
 
-		
+
 	}
 
 	void initializeTouch() {
@@ -439,54 +520,54 @@ public:
 		Serial.println(millis());
 		Serial.flush();
 		delay(100);
-		
+
 		screenLog("TOUCH: Initializing...");
-		
+
 		// Initialize I2C for FT6336U touch controller
 		Serial.println("Step 1: Setting up I2C...");
 		Serial.flush();
 		delay(50);
-		
+
 		Wire.begin(TOUCH_SDA, TOUCH_SCL);
-		
+
 		Serial.print("Step 2: I2C begin() called with SDA=");
 		Serial.print(TOUCH_SDA);
 		Serial.print(" SCL=");
 		Serial.println(TOUCH_SCL);
 		Serial.flush();
 		delay(50);
-		
+
 		screenLog("TOUCH: I2C begin SDA=" + String(TOUCH_SDA) + " SCL=" + String(TOUCH_SCL));
-		
+
 		Wire.setClock(400000);
 		Serial.println("Step 3: I2C clock set to 400kHz");
 		Serial.flush();
 		delay(200);
-		
+
 		screenLog("TOUCH: I2C 400kHz configured");
-		
+
 		// Scan for FT6336U at address 0x38
 		Serial.print("Step 4: Scanning I2C for FT6336U at address 0x");
 		Serial.println(TOUCH_ADDRESS, HEX);
 		Serial.flush();
 		delay(50);
-		
+
 		screenLog("TOUCH: Scanning for FT6336U at 0x38...");
-		
+
 		Wire.beginTransmission(TOUCH_ADDRESS);
 		uint8_t error = Wire.endTransmission();
-		
+
 		Serial.print("Step 5: I2C transmission result: ");
 		Serial.println(error);
 		Serial.flush();
 		delay(50);
-		
+
 		if (error == 0) {
 			touchInitialized = true;
 			Serial.println("SUCCESS: FT6336U FOUND at 0x38!");
 			Serial.flush();
 			delay(100);
-			
+
 			screenLog("TOUCH: SUCCESS - FT6336U found!");
 		} else {
 			Serial.println("ERROR: FT6336U NOT FOUND at address 0x38");
@@ -494,16 +575,16 @@ public:
 			Serial.println(error);
 			Serial.flush();
 			delay(100);
-			
+
 			screenLog("TOUCH: ERROR - not found at 0x38 (code " + String(error) + ")");
-			
+
 			// Try to scan all I2C addresses to find what's there
 			Serial.println("Scanning ALL I2C addresses 0x01-0x7E...");
 			Serial.flush();
 			delay(50);
-			
+
 			screenLog("TOUCH: Scanning all addresses...");
-			
+
 			bool found_any = false;
 			String found_devices = "";
 			for (uint8_t i = 1; i < 127; i++) {
@@ -513,16 +594,16 @@ public:
 					if (i < 0x10) Serial.print("0");
 					Serial.println(i, HEX);
 					Serial.flush();
-					
+
 					if (found_devices.length() > 0) found_devices += ", ";
 					found_devices += "0x";
 					if (i < 0x10) found_devices += "0";
 					found_devices += String(i, HEX);
-					
+
 					found_any = true;
 				}
 			}
-			
+
 			if (found_any) {
 				screenLog("TOUCH: Found devices at: " + found_devices);
 			} else {
@@ -530,13 +611,13 @@ public:
 			}
 			Serial.flush();
 			delay(100);
-			
+
 			touchInitialized = false;
 		}
 		Serial.println("========== TOUCH INITIALIZATION END ==========\n");
 		Serial.flush();
 		delay(100);
-		
+
 		screenLog("TOUCH: Init complete");
 	}
 
@@ -595,7 +676,7 @@ public:
 		isTCCutNull = FlowSerialReadStringUntil(';');  // [29] TCCut (0 or 1)
 		brakeBias = FlowSerialReadStringUntil(';');    // [30] BrakeBias (e.g., 68.0)
 		brake = FlowSerialReadStringUntil(';');        // [31] Brake pedal (0-100)
-		
+
 		// Validate brakeBias (should be between 0-100)
 		brakeBias.trim();
 		float brakeBiasVal = brakeBias.toFloat();
@@ -615,10 +696,10 @@ public:
 		currentFlag.trim();
 		currentPenalties = FlowSerialReadStringUntil(';');
 		cutTrackWarnings = FlowSerialReadStringUntil(';');
-		
+
 		// Debug: Log flag value (raw)
 		debugLog(String("[RAW] idx39 flag: '") + currentFlag + "'");
-		debugLog(String("[SHCustomProtocol] Flag value received [39]: '") + currentFlag + 
+		debugLog(String("[SHCustomProtocol] Flag value received [39]: '") + currentFlag +
 				 String("' (len=") + currentFlag.length() + ")");
 
 		// BLOCO 6: Mensagens e Alertas (índices 42-43)
@@ -634,12 +715,12 @@ public:
 		         " | cut=" + cutTrackWarnings +
 		         " | alert=" + alertMessage +
 		         " | popup=" + popupMessage);
-		
+
 		// Debug: Log alert and popup raw values
 		debugLog(String("[RAW] idx42 alert: '") + alertMessage + "'");
-		debugLog(String("[SHCustomProtocol] Alert [42]: '") + alertMessage + 
+		debugLog(String("[SHCustomProtocol] Alert [42]: '") + alertMessage +
 				 String("' (len=") + alertMessage.length() + ")");
-		debugLog(String("[SHCustomProtocol] Popup [43]: '") + popupMessage + 
+		debugLog(String("[SHCustomProtocol] Popup [43]: '") + popupMessage +
 				 String("' (len=") + popupMessage.length() + ")");
 
 		// BLOCO 7: Dados para Arduino LEDs (índices 44-47)
@@ -731,7 +812,7 @@ public:
 		appendField(turboBoost);
 		if (rawPacket.length() > 0) rawPacket.remove(rawPacket.length() - 1); // remove last ';'
 		debugLog(String("[RAW] packet: ") + rawPacket);
-		
+
 
 		// Re-parse critical indices from rawPacket to avoid any misalignment
 		String fields[62];
@@ -770,7 +851,7 @@ public:
 		}
 
 		// Debug: Log complete packet received
-		debugLog(String("[SHCustomProtocol] Telemetry packet complete - Speed: ") + speed + 
+		debugLog(String("[SHCustomProtocol] Telemetry packet complete - Speed: ") + speed +
 				 String(" | Alert: ") + (alertMessage != "NORMAL" ? alertMessage : "none") +
 				 String(" | Flag: ") + currentFlag);
 	}
@@ -778,18 +859,24 @@ public:
 	// Called once per arduino loop, timing can't be predicted,
 	// but it's called between each command sent to the arduino
 	void loop() {
+		// Limpa pop-up vindo do UART após o tempo definido
+		if (popupFromUart && popupFromUartUntil > 0 && millis() > popupFromUartUntil) {
+			popupMessage = "";
+			popupFromUart = false;
+			popupFromUartUntil = 0;
+		}
 		// Initialize touch right after loading screen is shown (before SimHub data arrives)
 		if (!touchInitAttempted && loadingScreenShown) {
 			touchInitAttempted = true;
 			initializeTouch();
 		}
-		
+
 		// Check for touch input to change pages
 		if (touchInitialized && hasReceivedData) {
 			TouchPoint touch = readTouch();
 			if (touch.touched && (millis() - lastTouchTime) > TOUCH_DEBOUNCE_MS) {
 				lastTouchTime = millis();
-				
+
 				// Left half = previous page, Right half = next page
 				if (touch.x < SCREEN_WIDTH / 2) {
 					// Previous page (left swipe)
@@ -800,7 +887,7 @@ public:
 					currentPage = (DashboardPage)((currentPage + 1) % 6);
 					gfx->fillScreen(BLACK);  // Clear screen for new page
 				}
-				
+
 				// Reset draw cache when page changes to force complete redraw
 				if (currentPage != lastPage) {
 					resetDrawCache();
@@ -808,13 +895,13 @@ public:
 				}
 			}
 		}
-		
+
 		// Detect page changes (for cases other than touch)
 		if (currentPage != lastPage) {
 			resetDrawCache();
 			lastPage = currentPage;
 		}
-		
+
 		if (!hasReceivedData) {
 			// Show loading animation on LEDs while waiting for SimHub
 			#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
@@ -822,14 +909,14 @@ public:
 			#endif
 			return;
 		}
-		
+
 		// Check if we need full redraw after alert expired
 		if (needsFullRedraw) {
 			gfx->fillScreen(BLACK);
 			resetDrawCache();  // Clear all caches
 			needsFullRedraw = false;
 		}
-		
+
 		// Draw page-specific content
 		switch (currentPage) {
 			case PAGE_RACE:
@@ -854,13 +941,13 @@ public:
 				drawLeaderboardPageContent();
 				break;
 		}
-		
+
 		// Draw alerts (flags, penalties, etc.) on top of everything
 		drawAlert();
-		
+
 		// Draw page indicator at bottom
 		drawPageIndicator();
-		
+
 		// Update LED strip with current telemetry data
 		#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
 		updateCustomLEDs(
@@ -878,7 +965,7 @@ public:
 		);
 		#endif
 	}
-	
+
 	void drawPageIndicator() {
 		// Draw small page indicator dots at bottom center (7 pages)
 		// Positioned in dedicated padding area at bottom
@@ -887,7 +974,7 @@ public:
 		int totalWidth = (7 - 1) * dotSpacing + (dotRadius * 2);
 		int startX = (SCREEN_WIDTH - totalWidth) / 2;  // Center horizontally
 		int startY = SCREEN_HEIGHT + 41;  // 8px from bottom margin (colado na borda)
-		
+
 		for (int i = 0; i < 7; i++) {
 			uint16_t color = (i == currentPage) ? WHITE : RGB565(100, 100, 100);
 			gfx->fillCircle(startX + (i * dotSpacing), startY, dotRadius, color);
@@ -909,7 +996,7 @@ public:
 		};
 		StatusItem items[5];
 		int itemCount = 0;
-		
+
 		// 1. Position (always first)
 		items[itemCount++] = {
 			position,
@@ -917,7 +1004,7 @@ public:
 			"statusPos",
 			YELLOW
 		};
-		
+
 		// 2. Fuel (always second)
 		float fuelLaps = fuelRemainingLaps.toFloat();
 		String fuelDisplay = String(fuelLaps, 1) + "L";  // Format with 1 decimal place + " L"
@@ -927,7 +1014,7 @@ public:
 			"statusFuel",
 			fuelLaps < 3.0f ? RED : WHITE
 		};
-		
+
 		// 3. KERS if hybrid (priority)
 		int kersVal = kersLevel.toInt();
 		bool hasKers = (kersVal > 0);
@@ -939,7 +1026,7 @@ public:
 				kersVal < 20 ? RED : GREEN
 			};
 		}
-		
+
 		// 4. Oil if critical OR space available
 		int oilTempVal = oilTemperature.toInt();
 		bool oilCritical = (oilTempVal > 110);
@@ -951,7 +1038,7 @@ public:
 				oilCritical ? RED : ORANGE
 			};
 		}
-		
+
 		// 5. Fill remaining slots (turbo > water > gap)
 		if (itemCount < 5) {
 			// Try turbo first - only if string is not empty AND value is meaningful
@@ -979,7 +1066,7 @@ public:
 				}
 			}
 		}
-		
+
 		// 6. Last slot: gap if space
 		if (itemCount < 5 && driverAheadGap.length() > 0 && driverAheadGap != "--") {
 			items[itemCount++] = {
@@ -989,23 +1076,23 @@ public:
 				WHITE
 			};
 		}
-		
+
 		// Clear unused columns if itemCount < 5
 		// for (int i = itemCount; i < 5; i++) {
 		// 	gfx->fillRect(COL[i], ROW[0], CELL_WIDTH, CELL_HEIGHT, BLACK);
 		// }
-		
+
 		// Draw only collected items (itemCount is accurate)
 		for (int i = 0; i < itemCount; i++) {
 			drawCell(COL[i], ROW[0], items[i].value, items[i].cacheKey, items[i].label, "center", items[i].color);
 		}
 	}
-	
+
 	void drawRacePageContent() {
 		// Reset cursor and text state to prevent drawing artifacts
 		gfx->setCursor(0, 0);
 		gfx->setTextColor(WHITE, BLACK);
-		
+
 		// Original dashboard content - LAYOUT CLÁSSICO
 		// drawRpmMeter(0, 0, SCREEN_WIDTH, CELL_HEIGHT);
 		drawStatusBar();
@@ -1041,7 +1128,7 @@ public:
 		drawCell(COL[3], ROW[4], tyrePressureRearLeft, "tyrePressureRearLeft", "RL", "center", CYAN);
 		drawCell(COL[4], ROW[4], tyrePressureRearRight, "tyrePressureRearRight", "RR", "center", CYAN);
 	}
-	
+
 	void drawTimingPageContent() {
 		// PAGE 2: Timing/Lap Analysis - with visual layout (full width)
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 20, 60));  // Header background
@@ -1049,7 +1136,7 @@ public:
 		gfx->setTextSize(3);
 		gfx->setCursor(10, 10);
 		gfx->print("TIMING");
-		
+
 		// Best lap box
 		gfx->drawRect(5, 55, SCREEN_WIDTH - 10, 70, YELLOW);
 		gfx->fillRect(5, 55, SCREEN_WIDTH - 10, 25, YELLOW);
@@ -1061,7 +1148,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20, 82);
 		gfx->print(bestLapTime);
-		
+
 		// Last lap box
 		gfx->drawRect(5, 135, SCREEN_WIDTH - 10, 70, CYAN);
 		gfx->fillRect(5, 135, SCREEN_WIDTH - 10, 25, CYAN);
@@ -1073,7 +1160,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20, 162);
 		gfx->print(lastLapTime);
-		
+
 		// Current lap box
 		gfx->drawRect(5, 215, SCREEN_WIDTH - 10, 55, GREEN);
 		gfx->fillRect(5, 215, SCREEN_WIDTH - 10, 25, GREEN);
@@ -1085,7 +1172,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20, 242);
 		gfx->print(currentLapTime);
-		
+
 		// Delta indicator on the right
 		gfx->drawRect(SCREEN_WIDTH - 75, 55, 70, 215, WHITE);
 		gfx->fillRect(SCREEN_WIDTH - 75, 55, 70, 25, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
@@ -1098,7 +1185,7 @@ public:
 		gfx->setCursor(SCREEN_WIDTH - 70, 90);
 		gfx->print(sessionBestLiveDeltaSeconds);
 	}
-	
+
 	void drawTelemetryPageContent() {
 		// PAGE 3: Telemetry/Vehicle Status - with visual boxes (full width)
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 20));  // Header background
@@ -1106,7 +1193,7 @@ public:
 		gfx->setTextSize(3);
 		gfx->setCursor(10, 10);
 		gfx->print("TELEMETRY");
-		
+
 		// Speed - Large display (left side)
 		int speedBoxWidth = (SCREEN_WIDTH - 20) / 2;
 		gfx->drawRect(5, 55, speedBoxWidth, 80, YELLOW);
@@ -1119,7 +1206,7 @@ public:
 		gfx->setTextSize(3);
 		gfx->setCursor(20, 75);
 		gfx->print(speed);
-		
+
 		// TC/ABS indicators side by side (right side)
 		int tcBoxWidth = (SCREEN_WIDTH - 25) / 2;
 		// TC Box
@@ -1133,7 +1220,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20 + speedBoxWidth + 5, 70);
 		gfx->print(tcLevel);
-		
+
 		// ABS Box
 		gfx->drawRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 35, BLUE);
 		gfx->fillRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 20, BLUE);
@@ -1145,7 +1232,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20 + speedBoxWidth + 5, 110);
 		gfx->print(absLevel);
-		
+
 		// Brake Box (full width)
 		gfx->drawRect(5, 145, SCREEN_WIDTH - 10, 50, RED);
 		gfx->fillRect(5, 145, SCREEN_WIDTH - 10, 25, RED);
@@ -1158,7 +1245,7 @@ public:
 		gfx->setCursor(30, 165);
 		gfx->print(brake);
 		gfx->print("%");
-		
+
 		// Tyre pressures grid (full width, split in 2)
 		int tyreBoxWidth = (SCREEN_WIDTH - 15) / 2;
 		gfx->drawRect(5, 205, tyreBoxWidth, 65, CYAN);
@@ -1174,7 +1261,7 @@ public:
 		gfx->setCursor(10, 245);
 		gfx->print("RL: ");
 		gfx->print(tyrePressureRearLeft);
-		
+
 		gfx->drawRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 65, CYAN);
 		gfx->fillRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 20, CYAN);
 		gfx->setTextColor(BLACK);
@@ -1189,7 +1276,7 @@ public:
 		gfx->print("RR: ");
 		gfx->print(tyrePressureRearRight);
 	}
-	
+
 	void drawAdvancedTelemetryPage() {
 		// PAGE 3B: Advanced Telemetry - Motor, Wear, Environment, DRS, KERS, Turbo
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 80));  // Header background (Purple)
@@ -1197,11 +1284,11 @@ public:
 		gfx->setTextSize(3);
 		gfx->setCursor(10, 10);
 		gfx->print("ADVANCED");
-		
+
 		int boxHeight = 45;
 		int boxWidth = (SCREEN_WIDTH - 15) / 2;
 		int yPos = 55;
-		
+
 		// Row 1: Motor temperatures
 		// Oil Temperature
 		gfx->drawRect(5, yPos, boxWidth, boxHeight, WHITE);
@@ -1214,7 +1301,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(10, yPos + 25);
 		gfx->print("--C");  // Placeholder - seria: oilTemperature + "C"
-		
+
 		// Water Temperature
 		gfx->drawRect(5 + boxWidth + 5, yPos, boxWidth, boxHeight, WHITE);
 		gfx->fillRect(5 + boxWidth + 5, yPos, boxWidth, 20, WHITE);
@@ -1226,9 +1313,9 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(10 + boxWidth + 5, yPos + 25);
 		gfx->print("--C");  // Placeholder
-		
+
 		yPos += boxHeight + 5;
-		
+
 		// Row 2: Tyre Wear
 		gfx->drawRect(5, yPos, SCREEN_WIDTH - 10, boxHeight, RGB565(200, 100, 0));
 		gfx->fillRect(5, yPos, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
@@ -1236,9 +1323,9 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10, yPos + 5);
 		gfx->print("TYRE WEAR | FL: 0% FR: 0% RL: 0% RR: 0%");  // Placeholder
-		
+
 		yPos += boxHeight + 5;
-		
+
 		// Row 3: Environment + DRS/KERS/Turbo
 		// Air Temp
 		gfx->drawRect(5, yPos, 60, boxHeight, RGB565(0, 100, 200));
@@ -1251,7 +1338,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10, yPos + 25);
 		gfx->print("--C");
-		
+
 		// Road Temp
 		gfx->drawRect(70, yPos, 60, boxHeight, RGB565(200, 0, 0));
 		gfx->fillRect(70, yPos, 60, 20, RGB565(200, 0, 0));
@@ -1263,7 +1350,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(75, yPos + 25);
 		gfx->print("--C");
-		
+
 		// DRS
 		uint16_t drsBoxColor = drsActive == "1" ? BLUE : (drsAvailable == "1" ? GREEN : RGB565(50, 50, 50));
 		gfx->drawRect(135, yPos, 60, boxHeight, drsBoxColor);
@@ -1276,7 +1363,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(140, yPos + 25);
 		gfx->print(drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "OFF"));
-		
+
 		// KERS
 		uint16_t kersBarWidth = (String(kersLevel).toInt() * 40) / 100;  // 40px width for 100%
 		gfx->drawRect(200, yPos, 60, boxHeight, MAGENTA);
@@ -1286,7 +1373,7 @@ public:
 		gfx->setCursor(205, yPos + 5);
 		gfx->print("KERS");
 		gfx->fillRect(200, yPos + 25, kersBarWidth, 15, MAGENTA);
-		
+
 		// Turbo
 		gfx->drawRect(265, yPos, 65, boxHeight, RGB565(255, 128, 0));
 		gfx->fillRect(265, yPos, 65, 20, RGB565(255, 128, 0));
@@ -1299,7 +1386,7 @@ public:
 		gfx->setCursor(270, yPos + 25);
 		gfx->print("0.0B");  // Placeholder
 	}
-	
+
 	void drawLapsPageContent() {
 		// PAGE 5: Laps/Sectors Analysis - with nice layout
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(40, 20, 60));  // Header background
@@ -1307,11 +1394,11 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(10, 12);
 		gfx->print("LAPS/SECTORS");
-		
+
 		// Lap times summary - Three boxes spanning full width
 		int boxWidth = (SCREEN_WIDTH - 20) / 3;  // 3 boxes with 5px spacing
 		int boxHeight = 65;
-		
+
 		// Best lap
 		gfx->drawRect(5, 50, boxWidth, boxHeight, YELLOW);
 		gfx->fillRect(5, 50, boxWidth, 20, YELLOW);
@@ -1323,7 +1410,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10, 72);
 		gfx->print(bestLapTime);
-		
+
 		// Last lap
 		gfx->drawRect(5 + boxWidth + 5, 50, boxWidth, boxHeight, CYAN);
 		gfx->fillRect(5 + boxWidth + 5, 50, boxWidth, 20, CYAN);
@@ -1335,7 +1422,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10 + boxWidth + 5, 72);
 		gfx->print(lastLapTime);
-		
+
 		// Current lap
 		gfx->drawRect(5 + (boxWidth + 5) * 2, 50, boxWidth, boxHeight, GREEN);
 		gfx->fillRect(5 + (boxWidth + 5) * 2, 50, boxWidth, 20, GREEN);
@@ -1347,7 +1434,7 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10 + (boxWidth + 5) * 2, 72);
 		gfx->print(currentLapTime);
-		
+
 		// Sector times - detailed box (full width) - AGORA COM DADOS REAIS
 		gfx->drawRect(5, 125, SCREEN_WIDTH - 10, 120, WHITE);
 		gfx->fillRect(5, 125, SCREEN_WIDTH - 10, 25, WHITE);
@@ -1355,48 +1442,48 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10, 132);
 		gfx->print("SECTOR TIMES");
-		
+
 		// Sector 1
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(15, 160);
 		gfx->print("S1");
 		gfx->setCursor(45, 160);
 		gfx->print(": " + sector1Time);
-		
+
 		// Sector 2
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(15, 180);
 		gfx->print("S2");
 		gfx->setCursor(45, 180);
 		gfx->print(": " + sector2Time);
-		
+
 		// Sector 3
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(15, 200);
 		gfx->print("S3");
 		gfx->setCursor(45, 200);
 		gfx->print(": " + sector3Time);
-		
+
 		// Lap invalid status
 		if (lapInvalidated == "True") {
 			gfx->setTextColor(RED);
 			gfx->setCursor(220, 145);
 			gfx->print("INVALID");
 		}
-		
+
 		// Tyre wear bar (full width at bottom)
 		gfx->drawRect(5, 260, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
 		gfx->fillRect(5, 260, SCREEN_WIDTH - 10, 5, RGB565(200, 100, 0));
 		gfx->setTextColor(RGB565(255, 200, 0));
 		gfx->setTextSize(1);
 		gfx->setCursor(10, 265);
-		
+
 		// Draw wear percentages
-		String wearStr = "Wear - FL:" + tyreWearFrontLeft + "% FR:" + tyreWearFrontRight + 
+		String wearStr = "Wear - FL:" + tyreWearFrontLeft + "% FR:" + tyreWearFrontRight +
 		                 "% RL:" + tyreWearRearLeft + "% RR:" + tyreWearRearRight + "%";
 		gfx->print(wearStr);
 	}
-	
+
 	void drawRelativePageContent() {
 		// PAGE 4: Position, Gaps, Fuel & DRS - DADOS ESTRATÉGICOS
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
@@ -1404,7 +1491,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(10, 12);
 		gfx->print("STRATEGY");
-		
+
 		// Position Box - Top
 		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 50, WHITE);
 		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
@@ -1416,7 +1503,7 @@ public:
 		gfx->setTextSize(3);
 		gfx->setCursor(20, 75);
 		gfx->print(position + "/" + opponentsCount);
-		
+
 		// Gap+ Box (Driver Ahead)
 		gfx->drawRect(5, 110, (SCREEN_WIDTH - 15) / 2, 50, MAGENTA);
 		gfx->fillRect(5, 110, (SCREEN_WIDTH - 15) / 2, 25, MAGENTA);
@@ -1428,7 +1515,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(15, 135);
 		gfx->print(driverAheadGap);
-		
+
 		// Gap- Box (Driver Behind)
 		int halfWidth = (SCREEN_WIDTH - 15) / 2;
 		gfx->drawRect(10 + halfWidth, 110, halfWidth, 50, ORANGE);
@@ -1441,7 +1528,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20 + halfWidth, 135);
 		gfx->print(driverBehindGap);
-		
+
 		// Fuel Box
 		gfx->drawRect(5, 170, (SCREEN_WIDTH - 15) / 2, 50, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
 		gfx->fillRect(5, 170, (SCREEN_WIDTH - 15) / 2, 25, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
@@ -1453,7 +1540,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(15, 195);
 		gfx->print(fuelRemainingLaps);
-		
+
 		// DRS Box
 		uint16_t drsColor = WHITE;
 		String drsText = "CLOSED";
@@ -1474,7 +1561,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(20 + halfWidth, 195);
 		gfx->print(drsText);
-		
+
 		// Fuel consumption info at bottom
 		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, CYAN);
 		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, CYAN);
@@ -1486,7 +1573,7 @@ public:
 		gfx->setCursor(10, 250);
 		gfx->print("Time left: " + sessionTimeLeft);
 	}
-	
+
 	void drawLeaderboardPageContent() {
 		// PAGE 6: Leaderboard - with nice styling
 		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 60, 20));  // Header background
@@ -1494,7 +1581,7 @@ public:
 		gfx->setTextSize(2);
 		gfx->setCursor(10, 12);
 		gfx->print("LEADERBOARD");
-		
+
 		// Leaderboard box (full width)
 		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 215, WHITE);
 		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
@@ -1502,14 +1589,14 @@ public:
 		gfx->setTextSize(1);
 		gfx->setCursor(10, 57);
 		gfx->print("POS  DRIVER          TIME       GAP");
-		
+
 		// Draw separator line
 		gfx->drawLine(5, 75, SCREEN_WIDTH - 5, 75, RGB565(100, 100, 100));
-		
+
 		// Leaderboard entries - small font
 		gfx->setTextSize(1);
 		int yPos = 85;
-		
+
 		// 1st place (leading driver)
 		gfx->setTextColor(YELLOW);
 		gfx->setCursor(10, yPos);
@@ -1520,9 +1607,9 @@ public:
 		gfx->print("01:34.23");
 		gfx->setCursor(200, yPos);
 		gfx->print("--:--");
-		
+
 		yPos += 18;
-		
+
 		// 2nd place
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(10, yPos);
@@ -1533,9 +1620,9 @@ public:
 		gfx->print("01:34.89");
 		gfx->setCursor(200, yPos);
 		gfx->print("+0.66s");
-		
+
 		yPos += 18;
-		
+
 		// 3rd place (YOU)
 		gfx->setTextColor(CYAN);
 		gfx->setCursor(10, yPos);
@@ -1546,9 +1633,9 @@ public:
 		gfx->print("01:35.12");
 		gfx->setCursor(200, yPos);
 		gfx->print("+0.89s");
-		
+
 		yPos += 18;
-		
+
 		// 4th place
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(10, yPos);
@@ -1559,9 +1646,9 @@ public:
 		gfx->print("01:35.67");
 		gfx->setCursor(200, yPos);
 		gfx->print("+1.44s");
-		
+
 		yPos += 18;
-		
+
 		// 5th place
 		gfx->setTextColor(WHITE);
 		gfx->setCursor(10, yPos);
@@ -1572,7 +1659,7 @@ public:
 		gfx->print("01:36.01");
 		gfx->setCursor(200, yPos);
 		gfx->print("+1.78s");
-		
+
 		// Summary bar at bottom
 		gfx->drawRect(5, 265, 250, 20, CYAN);
 		gfx->fillRect(5, 265, 250, 20, CYAN);
@@ -1716,7 +1803,7 @@ public:
 		}
 
 	}
-	
+
 	// Helper function to validate alert strings - prevents garbage data display
 	bool isValidAlertString(const String &str) {
 		String normalized = str;
@@ -1725,7 +1812,7 @@ public:
 		upper.toUpperCase();
 
 		// Check for valid alert strings only
-		if (upper == "ENGINE OFF" || upper == "PIT LIMITER" || upper == "YELLOW FLAG" || 
+		if (upper == "ENGINE OFF" || upper == "PIT LIMITER" || upper == "YELLOW FLAG" ||
 			upper == "BLUE FLAG" || upper == "LOW FUEL" || upper == "BLACK FLAG" ||
 			upper == "MEATBALL" || upper == "SLOW CAR" || upper == "GREEN FLAG" ||
 			upper == "FINISHED" || upper == "RED FLAG") {
@@ -1745,13 +1832,13 @@ public:
 		}
 		return false;
 	}
-	
+
 	// Remove "LEVEL" suffix from alert text for cleaner display
 	String cleanAlertText(const String &text) {
 		String result = text;
 		String upper = text;
 		upper.toUpperCase();
-		
+
 		// Remove " LEVEL" if present (case insensitive)
 		// int idx = upper.lastIndexOf(" LEVEL");
 		// if (idx >= 0) {
@@ -1767,21 +1854,21 @@ public:
 			// Replace ": " with "\n" to put value on new line
 			result.replace(" FLAG", "");
 		}
-		
+
 		// // Format "TC: 3" or "ABS: 5" as "TC\n3" or "ABS\n5" (label on first line, value on second)
 		// // This improves readability with large text
 		if (result.indexOf(':') >= 0) {
 			// Replace ": " with "\n" to put value on new line
 			result.replace(": ", "\n\n");
 		}
-		
+
 		return result;
 	}
-	
+
 	// Draw alerts/flags in the center of the screen
 	void drawAlert() {
 		if (!canUseDisplay()) return;
-		
+
 		// Check if we should show an alert
 		bool shouldShowAlert = false;
 		String alertText = "";
@@ -1795,19 +1882,19 @@ public:
 		popupNormalized.trim();
 		String popupUpper = popupNormalized;
 		popupUpper.toUpperCase();
-		
+
 		// PRIORIDADE 1: Alertas críticos do SimHub (alertMessage)
 		// Only show if it's a real alert (not empty, not "NORMAL", not "NONE", not "0")
 		// Additional safety: check if string contains only valid characters (alphanumeric, space, colon, etc)
-		if (alertUpper.length() > 0 && 
-			alertUpper != "NORMAL" && 
-			alertUpper != "NONE" && 
-			alertUpper != "0" && 
+		if (alertUpper.length() > 0 &&
+			alertUpper != "NORMAL" &&
+			alertUpper != "NONE" &&
+			alertUpper != "0" &&
 			isValidAlertString(alertUpper)) {
 			shouldShowAlert = true;
 			alertStartTime = millis();
 			alertText = cleanAlertText(alertNormalized);
-			
+
 			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
 				bgColor = RGB565(20, 20, 20);
 				textColor = RED;
@@ -1831,19 +1918,19 @@ public:
 				textColor = WHITE;
 			}
 		}
-		
+
 		// PRIORIDADE 2: Pop-up temporário (popupMessage) - mensagens de mudanças menores
 		// Only show if it's a real message (not empty, not "NORMAL", not "NONE", not "0")
-		if (popupUpper.length() > 0 && 
-			popupUpper != "NORMAL" && 
-			popupUpper != "NONE" && 
+		if (popupUpper.length() > 0 &&
+			popupUpper != "NORMAL" &&
+			popupUpper != "NONE" &&
 			popupUpper != "0") {
 			// Override any existing alert for control changes (ABS/TC/BIAS/MAP)
 			// Popups are short-lived and should take precedence over flags
 			shouldShowAlert = true;
 			alertStartTime = millis();
 			alertText = cleanAlertText(popupNormalized);
-			
+
 			// Check for flag messages in popup
 			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
 				bgColor = RGB565(20, 20, 20);
@@ -1868,7 +1955,7 @@ public:
 				textColor = YELLOW;
 			}
 		}
-		
+
 		// Check for flag changes - TODAS AS BANDEIRAS SUPORTADAS
 		// Only process if flag is not "None" and not empty
 		String flagValue = currentFlag;
@@ -1877,44 +1964,44 @@ public:
 			shouldShowAlert = true;
 			alertStartTime = millis();
 			prevFlag = flagValue;
-			
+
 			// 🔵 Blue Flag
 			if (flagValue.equalsIgnoreCase("Blue")) {
 				alertText = "BLUE FLAG";
 				bgColor = BLUE;
 				textColor = WHITE;
-			} 
+			}
 			// 🟡 Yellow Flag
 			else if (flagValue.equalsIgnoreCase("Yellow")) {
 				alertText = "YELLOW FLAG";
 				bgColor = YELLOW;
 				textColor = BLACK;
-			} 
+			}
 			// ⚫ Black Flag
 			else if (flagValue.equalsIgnoreCase("Black")) {
 				alertText = "BLACK FLAG";
 				bgColor = RGB565(20, 20, 20);
 				textColor = WHITE;
-			} 
+			}
 			// 🟠 Orange Flag (Meatball)
 			else if (flagValue.equalsIgnoreCase("Orange")) {
 				alertText = "MEATBALL";
 				bgColor = ORANGE;
 				textColor = BLACK;
-			} 
+			}
 			// ⚪ White Flag (Slow Car)
 			else if (flagValue.equalsIgnoreCase("White")) {
 				alertText = "SLOW CAR";
 				bgColor = WHITE;
 				textColor = BLACK;
-			} 
+			}
 			// 🟢 Green Flag
 			else if (flagValue.equalsIgnoreCase("Green")) {
 				alertText = "GREEN FLAG";
 				// bgColor = BLUE;
 				bgColor = GREEN;  // Pure green RGB565 (R=0, G=31, B=0)
 				textColor = BLACK;
-			} 
+			}
 			// 🏁 Checkered Flag (Finished)
 			else if (flagValue.equalsIgnoreCase("Checkered")) {
 				alertText = "FINISHED";
@@ -1928,7 +2015,7 @@ public:
 				textColor = WHITE;
 			}
 		}
-		
+
 		// Check for penalty changes (fallback)
 		if (currentPenalties != prevPenalties && currentPenalties.toInt() > 0 && alertText.length() == 0) {
 			shouldShowAlert = true;
@@ -1938,12 +2025,12 @@ public:
 			bgColor = RGB565(200, 0, 0);  // Dark red
 			textColor = WHITE;
 		}
-		
+
 		// Check if alert should still be displayed (3 second duration)
 		// If a new alert was triggered, reset the timer
 		unsigned long elapsedTime = millis() - alertStartTime;
 		bool showingNow = (elapsedTime < ALERT_DURATION_MS) && (alertText.length() > 0);
-		
+
 		if (showingNow) {
             if (alertText.length() > 0) {
                 // ... (código anterior de contagem de linhas igual) ...
@@ -1951,45 +2038,45 @@ public:
                 for (int i = 0; i < alertText.length(); i++) {
                     if (alertText[i] == '\n') lineCount++;
                 }
-                
+
                 int lineHeight = 50;
                 int totalTextHeight = lineHeight * lineCount;
-                
+
                 // --- AJUSTE DE POSICIONAMENTO ---
-                
+
                 // 1. Defina a altura da sua barra de telemetria (chutei 50px pela foto)
-                int bottomBarHeight = 0; 
-                
+                int bottomBarHeight = 0;
+
                 // 2. A altura disponível para o alerta é a tela inteira MENOS a barra
                 int availableScreenHeight = SCREEN_HEIGHT - bottomBarHeight;
 
                 // 3. Ajustei a altura do box para ser menor que a área disponível
                 // (280 era muito grande, deixei 260 para ter respiro em cima e embaixo)
-                int alertHeight = 260; 
-                
+                int alertHeight = 260;
+
                 int alertWidth = SCREEN_WIDTH;
                 int alertX = 0;
-                
+
                 // 4. O cálculo do Y agora é baseado na availableScreenHeight
                 int alertY = ((availableScreenHeight - alertHeight) / 2)+30;
-                
+
                 // --- FIM DO AJUSTE ---
 
                 // Desenha o fundo
                 gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgColor);
-                
+
                 gfx->setTextColor(textColor);
                 gfx->setTextSize(6); // Mantive grande
-                
+
                 int16_t x1, y1;
                 uint16_t w, h;
-                
+
                 // Centraliza o texto dentro do novo box menor
                 // Adicionei um ajuste (-5) para correção visual da fonte
                 int currentY = alertY + (alertHeight - totalTextHeight) / 2 - 5;
-                
+
                 String remainingText = alertText;
-                
+
                 while (remainingText.length() > 0) {
                     // ... (lógica de quebra de linha igual ao anterior) ...
                     int newlinePos = remainingText.indexOf('\n');
@@ -2001,13 +2088,13 @@ public:
                         line = remainingText;
                         remainingText = "";
                     }
-                    
+
                     gfx->getTextBounds(line, 0, 0, &x1, &y1, &w, &h);
                     int centerX = (SCREEN_WIDTH - w) / 2;
-                    
+
                     // --- EFEITO NEGRITO (FAUX BOLD) ---
                     // Imprime 3 vezes com leve deslocamento para engrossar a letra
-                    
+
                     // 1. Camada mais grossa (deslocada 2px)
                     gfx->setCursor(centerX + 2, currentY);
                     gfx->print(line);
@@ -2020,10 +2107,10 @@ public:
                     gfx->setCursor(centerX, currentY);
                     gfx->print(line);
                     // ----------------------------------
-                    
+
                     currentY += lineHeight;
                 }
-                
+
                 alertWasShowing = true;
             }
         } else if (alertWasShowing) {
