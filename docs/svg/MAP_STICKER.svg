@@ -1,4 +1,4 @@
-<svg width="60mm" height="70mm" viewBox="-200 -200 400 450" xmlns="http://www.w3.org/2000/svg">
+<svg width="45mm" height="55mm" viewBox="-200 -200 400 450" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       .num { font-family: Arial, sans-serif; font-size: 26px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle; }
@@ -43,4 +43,18 @@
 
   <circle cx="0" cy="0" r="85" fill="#111" />
   <polygon points="0,-185 8,-165 -8,-165" fill="#E74C3C" stroke="#000" stroke-width="1"/>
+
+  <!-- X no centro -->
+  <line x1="-2" y1="-2" x2="2" y2="2" stroke="#ffffff" stroke-width="0.5"/>
+  <line x1="2" y1="-2" x2="-2" y2="2" stroke="#ffffff" stroke-width="0.5"/>
+
+  <!-- Círculo de 2mm no centro -->
+  <circle cx="0" cy="0" r="8" fill="none" stroke="#ffffff" stroke-width="0.3"/>
+
+  <!-- Círculo de 2mm no centro -->
+  <circle cx="0" cy="0" r="16" fill="none" stroke="#ffffff" stroke-width="0.3"/>
+
+  <!-- Círculo de 2mm no centro -->
+  <circle cx="0" cy="0" r="24" fill="none" stroke="#ffffff" stroke-width="0.3"/>
+
 </svg>

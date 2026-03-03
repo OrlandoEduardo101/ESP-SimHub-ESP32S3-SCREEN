@@ -35,6 +35,7 @@ O dashboard agora possui **3 páginas diferentes** que podem ser alternadas toca
 ### Trocar de Página
 - **Toque no LADO ESQUERDO da tela**: Vai para a página anterior
 - **Toque no LADO DIREITO da tela**: Vai para a próxima página
+- **Via MFC (encoder do volante)**: No menu MFC item "PAGE", gire para trocar página remotamente via UART (`$PAGE:NEXT:` / `$PAGE:PREV:`). Ver [MFC_MENU_IMPLEMENTATION.md](MFC_MENU_IMPLEMENTATION.md).
 
 ### Indicadores de Página
 Na parte inferior da tela há **3 pontos** que indicam:
@@ -99,7 +100,7 @@ Atualmente a tela é dividida em LEFT/RIGHT. Para mudar:
 ```cpp
 void handleTouch() {
     // ... código existente ...
-    
+
     // Exemplo: dividir em 3 zonas (esquerda, centro, direita)
     if (t.x < SCREEN_WIDTH / 3) {
         // Página anterior

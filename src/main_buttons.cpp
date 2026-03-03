@@ -74,8 +74,8 @@ struct EncoderPins {
 const EncoderPins encoderPins[NUM_ENCODERS] = {
     {11, 12},  // Encoder 1: GP11/GP12
     {13, 38},  // Encoder 2: GP13/GP38
-    {40, 41},  // Encoder 3: GP40/GP41 (ajustado para espaçamento melhor)
-    {17, 18}   // Encoder 4: GP17/GP18
+    {39, 41},  // Encoder 3: GP39/GP41 (ajustado para espaçamento melhor)
+    {14, 15}   // Encoder 4: GP14/GP15
 };
 
 // Encoder mode: axes (default) or virtual button clicks
@@ -156,41 +156,41 @@ void setupButtonMatrix() {
         pinMode(colPins[col], OUTPUT);
         digitalWrite(colPins[col], HIGH);
     }
-    
+
     // Configure row pins as INPUT_PULLUP
     for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
         pinMode(rowPins[row], INPUT_PULLUP);
     }
-    
+
     Serial.println("[ButtonMatrix] Initialized 5x5 matrix (25 buttons)");
 }
 
 void scanButtonMatrix() {
     unsigned long currentTime = millis();
-    
+
     // Scan each column
     for (uint8_t col = 0; col < MATRIX_COLS; col++) {
         // Set current column LOW (active), others HIGH (inactive)
         for (uint8_t c = 0; c < MATRIX_COLS; c++) {
             digitalWrite(colPins[c], (c == col) ? LOW : HIGH);
         }
-        
+
         delayMicroseconds(10);  // Small delay for signal stabilization
-        
+
         // Read all rows for this column
         for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
             bool reading = (digitalRead(rowPins[row]) == LOW);  // Pressed = LOW
-            
+
             // Debounce logic
             if (reading != prevButtonStates[row][col]) {
                 lastDebounceTime[row][col] = currentTime;
             }
-            
+
             if ((currentTime - lastDebounceTime[row][col]) > DEBOUNCE_DELAY) {
                 // If state has changed after debounce
                 if (reading != buttonStates[row][col]) {
                     buttonStates[row][col] = reading;
-                    
+
                     uint8_t buttonNum = getButtonNumber(row, col);
                     if (reading) {
                         Serial.print("[Button] Pressed: ");
@@ -209,11 +209,11 @@ void scanButtonMatrix() {
                     }
                 }
             }
-            
+
             prevButtonStates[row][col] = reading;
         }
     }
-    
+
     // Reset all columns to HIGH after scan
     for (uint8_t col = 0; col < MATRIX_COLS; col++) {
         digitalWrite(colPins[col], HIGH);
@@ -251,7 +251,7 @@ void setupEncoders() {
     for (uint8_t i = 0; i < NUM_ENCODERS; i++) {
         pinMode(encoderPins[i].pinA, INPUT_PULLUP);
         pinMode(encoderPins[i].pinB, INPUT_PULLUP);
-        
+
         encoderStates[i].lastEncoded = 0;
         encoderStates[i].encoderValue = 0;
         encoderStates[i].lastA = digitalRead(encoderPins[i].pinA);
@@ -261,7 +261,7 @@ void setupEncoders() {
         encoderStates[i].lastSentValue = 0;
         encoderStates[i].accumulator = 0;
     }
-    
+
     Serial.println("[Encoders] Initialized 4 rotary encoders");
 }
 
@@ -269,18 +269,18 @@ void scanEncoders() {
     for (uint8_t i = 0; i < NUM_ENCODERS; i++) {
         bool currentA = digitalRead(encoderPins[i].pinA);
         bool currentB = digitalRead(encoderPins[i].pinB);
-        
+
         // Detect state change
         if (currentA != encoderStates[i].lastA || currentB != encoderStates[i].lastB) {
             unsigned long now = micros();
-            
+
             // Minimal debounce
             if (now - encoderStates[i].lastChangeTime < ENCODER_DEBOUNCE_US) {
                 continue;
             }
-            
+
             encoderStates[i].lastChangeTime = now;
-            
+
             // Encode current state and use transition table for stable direction
             int8_t encoded = (currentA << 1) | currentB;
             uint8_t state = ((encoderStates[i].lastEncoded << 2) | encoded) & 0x0F;
@@ -313,7 +313,7 @@ void scanEncoders() {
                         encoderPulses[pulseIdxCW].active = true;
                         encoderPulses[pulseIdxCW].releaseAt = millis() + 30;
                         buttons |= (1UL << (encoderPulses[pulseIdxCW].id - 1));
-                        
+
                         Serial.print("[Encoder ");
                         Serial.print(i);
                         Serial.print("] CW → Button ");
@@ -328,7 +328,7 @@ void scanEncoders() {
                         encoderPulses[pulseIdxCCW].active = true;
                         encoderPulses[pulseIdxCCW].releaseAt = millis() + 30;
                         buttons |= (1UL << (encoderPulses[pulseIdxCCW].id - 1));
-                        
+
                         Serial.print("[Encoder ");
                         Serial.print(i);
                         Serial.print("] CCW → Button ");
@@ -338,7 +338,7 @@ void scanEncoders() {
                     Gamepad.send(axisX, axisY, axisZ, axisRZ, axisRX, axisRY, 0, buttons);
                 } else {
                     // Apply exponential smoothing filter (same for both directions)
-                    encoderStates[i].smoothedValue = (ENCODER_SMOOTHING * encoderStates[i].encoderValue) + 
+                    encoderStates[i].smoothedValue = (ENCODER_SMOOTHING * encoderStates[i].encoderValue) +
                                                       ((1.0 - ENCODER_SMOOTHING) * encoderStates[i].smoothedValue);
 
                     int8_t smoothed = (int8_t)round(encoderStates[i].smoothedValue);
@@ -357,7 +357,7 @@ void scanEncoders() {
                 }
             }
         }
-        
+
         encoderStates[i].lastA = currentA;
         encoderStates[i].lastB = currentB;
     }
@@ -396,7 +396,7 @@ void updateLEDs() {
         simhubLedControl = false;
         Serial.println("[LEDs] SimHub timeout - reverting to local control");
     }
-    
+
     // Only update locally if SimHub is not controlling
     if (!simhubLedControl) {
         // LEDs 1-4 mirror encoder direction: green = CW, red = CCW, blue = idle
@@ -416,13 +416,13 @@ void updateLEDs() {
         // 5th LED shows WiFi status + encoder mode
         if (LED_COUNT >= 5) {
             unsigned long now = millis();
-            
+
             switch (currentWifiStatus) {
                 case WIFI_DISCONNECTED:
                     // Off = desconectado
                     ledStrip.SetPixelColor(4, scaledColor(0, 0, 0));
                     break;
-                    
+
                 case WIFI_CONNECTING:
                     // Piscando azul = conectando
                     if ((now / 250) % 2 == 0) {
@@ -431,7 +431,7 @@ void updateLEDs() {
                         ledStrip.SetPixelColor(4, scaledColor(0, 0, 0));
                     }
                     break;
-                    
+
                 case WIFI_CONNECTED:
                     // Verde (sem SimHub) ou Ciano (com SimHub)
                     if (simhubClient.connected()) {
@@ -442,7 +442,7 @@ void updateLEDs() {
                         ledStrip.SetPixelColor(4, scaledColor(0, 200, 0));
                     }
                     break;
-                    
+
                 case WIFI_ERROR:
                     // Piscando vermelho = erro
                     if ((now / 500) % 2 == 0) {
@@ -465,7 +465,7 @@ void updateLEDs() {
 void setupWiFi() {
     Serial.println("[WiFi] Starting WiFiManager...");
     Serial.println("[WiFi] Hold buttons 1+5 for 3s to reset WiFi credentials");
-    
+
     // Configure WiFiManager
     wifiManager.setConfigPortalTimeout(180);  // 3 minutos timeout portal
     wifiManager.setConnectTimeout(30);        // 30s timeout conexão
@@ -480,35 +480,35 @@ void setupWiFi() {
         Serial.println("");
         currentWifiStatus = WIFI_CONNECTING;
     });
-    
+
     // Static IP se configurado
     if (USE_STATIC_IP) {
         wifiManager.setSTAStaticIPConfig(STATIC_IP, GATEWAY, SUBNET);
         Serial.print("[WiFi] Static IP configurado: ");
         Serial.println(STATIC_IP);
     }
-    
+
     currentWifiStatus = WIFI_CONNECTING;
-    
+
     // Tenta conectar (usa credenciais salvas ou abre portal)
     // SSID do portal: "ESP-SimHub-Config"
     if (!wifiManager.autoConnect("ESP-SimHub-Config")) {
         Serial.println("[WiFi] WiFiManager timeout - tentando fallback...");
-        
+
         // Fallback: tenta credenciais hardcoded
         WiFi.mode(WIFI_STA);
         if (USE_STATIC_IP) {
             WiFi.config(STATIC_IP, GATEWAY, SUBNET, PRIMARY_DNS, SECONDARY_DNS);
         }
         WiFi.begin(FALLBACK_SSID, FALLBACK_PASSWORD);
-        
+
         unsigned long startAttempt = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
             delay(100);
             Serial.print(".");
         }
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("");
         Serial.println("============================================================");
@@ -520,10 +520,10 @@ void setupWiFi() {
         Serial.print("[WiFi] Gateway: ");
         Serial.println(WiFi.gatewayIP());
         Serial.println("============================================================");
-        
+
         simhubServer.begin();
         Serial.println("[WiFi] SimHub TCP server started on port " + String(SIMHUB_PORT));
-        
+
         currentWifiStatus = WIFI_CONNECTED;
         wifiConnected = true;
     } else {
@@ -536,12 +536,12 @@ void setupWiFi() {
 
 void checkWiFiConnection() {
     unsigned long now = millis();
-    
+
     if (now - lastWifiCheck < WIFI_CHECK_INTERVAL) {
         return;
     }
     lastWifiCheck = now;
-    
+
     // Check WiFi status
     if (WiFi.status() != WL_CONNECTED) {
         if (wifiConnected) {
@@ -557,7 +557,7 @@ void checkWiFiConnection() {
             currentWifiStatus = WIFI_CONNECTED;
         }
     }
-    
+
     // Check for new SimHub client connections
     if (wifiConnected && !simhubClient.connected()) {
         WiFiClient newClient = simhubServer.available();
@@ -566,7 +566,7 @@ void checkWiFiConnection() {
             simhubClient = newClient;
         }
     }
-    
+
     // Disconnect dead clients
     if (simhubClient.connected() && !simhubClient.available()) {
         // Client might be dead - check with timeout
@@ -651,19 +651,19 @@ void Command_RGBLEDSCount() {
 void Command_RGBLEDSData() {
     // Read LED count from SimHub
     byte ledCount = FlowSerialTimedRead();
-    
+
     simhubLedControl = true;
     lastSimhubLedUpdate = millis();
-    
+
     for (byte i = 0; i < ledCount && i < LED_COUNT; i++) {
         byte r = FlowSerialTimedRead();
         byte g = FlowSerialTimedRead();
         byte b = FlowSerialTimedRead();
-        
+
         // Apply directly without brightness scaling (SimHub controls brightness)
         ledStrip.SetPixelColor(i, RgbColor(r, g, b));
     }
-    
+
     ledStrip.Show();
     FlowSerialWrite(0x15);  // ACK
 }
@@ -737,11 +737,11 @@ void setup(void) {
     // Initialize USB HID Gamepad
     Gamepad.begin();
     USB.begin();
-    
+
     // Initialize Serial for debug (USB CDC)
     Serial.begin(115200);
     delay(2000);  // Give time for USB to enumerate
-    
+
     Serial.println("\n========================================");
     Serial.println("ESP32-S3 SimHub ButtonBox Firmware");
     Serial.println("Version: k (WiFi + USB HID)");
@@ -752,17 +752,17 @@ void setup(void) {
     Serial.println(ESP.getFreeHeap());
     Serial.println("USB HID Gamepad: Enabled (32 buttons + 4 rotation axes)");
     Serial.println("========================================\n");
-    
+
     // Initialize components
     setupButtonMatrix();
     setupEncoders();
     setupLEDs();
-    
+
     Serial.println("[Startup] LED Test Sequence - ENABLED");
-    
+
     // Connect WiFi for SimHub communication
     setupWiFi();
-    
+
     Serial.println("\n[System] ButtonBox Ready!");
     if (wifiConnected) {
         Serial.println("[SimHub] Waiting for TCP connection on port " + String(SIMHUB_PORT) + "...");
@@ -777,7 +777,7 @@ void setup(void) {
 void loop() {
     // Check WiFi and SimHub client connections
     checkWiFiConnection();
-    
+
     // WiFi Reset: segure botões 1+5 por 3s
     static unsigned long wifiResetHoldStart = 0;
     if (isButtonPressed(1) && isButtonPressed(5)) {
@@ -793,21 +793,21 @@ void loop() {
     } else {
         wifiResetHoldStart = 0;
     }
-    
+
     // Scan inputs
     scanButtonMatrix();
     handleModeToggle();
     scanEncoders();
     updateLEDs();
     releaseVirtualButtonPulses();
-    
+
     // Handle SimHub commands (only if client is connected)
     if (simhubClient.connected() && FlowSerialAvailable() > 0) {
         int r = FlowSerialTimedRead();
-        
+
         if (r == MESSAGE_HEADER) {
             char cmd = FlowSerialTimedRead();
-            
+
             switch (cmd) {
                 case '1': Command_Hello(); break;
                 case '0': Command_Features(); break;
@@ -823,7 +823,7 @@ void loop() {
             }
         }
     }
-    
+
     yield();  // Feed watchdog
     delay(1);  // Small delay to prevent tight loop
-} 
+}

@@ -1,0 +1,128 @@
+## **Símbolos Padrão para Botões (HID Consumer Control & Automotivo)**
+
+### **🎮 MÍDIA / TRANSPORTE**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **▶** | PLAY | `▶` ou `\u25B6` | Reproduzir |
+| **⏸** | PAUSE | `⏸` ou `\u23F8` | Pausar |
+| **⏯️** | **PLAY/PAUSE** | `⏯️` ou `\u23EF` | **Play/Pause (toggle)** |
+| **⏹** | STOP | `⏹` ou `\u23F9` | Parar |
+| **⏭** | NEXT | `⏭` ou `\u23ED` | Próxima faixa |
+| **⏮** | PREV | `⏮` ou `\u23EE` | Faixa anterior |
+| **⏺** | REC | `⏺` ou `\u23FA` | Gravar |
+| **🔀** | SHUFFLE | `🔀` ou `\u1F500` | Aleatório |
+| **🔁** | REPEAT | `🔁` ou `\u1F501` | Repetir |
+| **🔂** | REPEAT ONE | `🔂` ou `\u1F502` | Repetir um |
+---
+
+### **🔊 VOLUME**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **🔇** | MUTE | `🔇` ou `\u1F507` | Silenciar |
+| **🔈** | VOL LOW | `🔈` ou `\u1F508` | Volume baixo |
+| **🔉** | VOL MED | `🔉` ou `\u1F509` | Volume médio |
+| **🔊** | VOL HIGH | `🔊` ou `\u1F50A` | Volume alto |
+| **VOL+** | VOLUME UP | `VOL+` (texto) | Aumentar volume |
+| **VOL-** | VOLUME DOWN | `VOL-` (texto) | Diminuir volume |
+| **➕** | PLUS | `➕` ou `\u2795` | Aumentar |
+| **➖** | MINUS | `➖` ou `\u2796` | Diminuir |
+
+---
+
+### **🚗 AUTOMOTIVO / ILUMINAÇÃO**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **💡** | HEADLIGHT | `💡` ou `\u1F4A1` | Farol |
+| **🔆** | HIGH BEAM | `🔆` ou `\u1F506` | Farol alto |
+| **🔅** | LOW BEAM | `🔅` ou `\u1F505` | Farol baixo |
+| **🚨** | HAZARD | `🚨` ou `\u1F6A8` | Pisca-alerta |
+| **🚥** | FOG LIGHT | `🚥` ou `\u1F6A5` | Farol de neblina |
+| **🚗** | HEADLIGHT | `🚗` ou `\u1F697` | Farol (alternativo) |
+| **⛽** | FUEL | `⛽` ou `\u26FD` | Combustível |
+| **🔋** | BATTERY | `🔋` ou `\u1F50B` | Bateria |
+| **🌡️** | TEMP | `🌡️` ou `\u1F321` | Temperatura |
+| **💧** | WATER | `💧` ou `\u1F4A7` | Água/Arrefecimento |
+| **⚙️** | SETTINGS | `⚙️` ou `\u2699` | Configurações |
+| **🔧** | CALIB | `🔧` ou `\u1F527` | Calibração |
+| **🔄** | RESET | `🔄` ou `\u1F504` | Reset |
+
+---
+
+### **🔄 MODOS / FUNÇÕES**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **🅰️** | AXIS | `🅰️` ou `\u1F170` | Modo eixo |
+| **🅱️** | BTN | `🅱️` ou `\u1F171` | Modo botão |
+| **🔄** | DUAL | `🔄` ou `\u1F504` | Modo duplo |
+| **🪞** | MIRROR | `🪞` ou `\u1FAAE` | Modo espelho |
+| **🎯** | BITE | `🎯` ou `\u1F3AF` | Bite point |
+| **☀️** | BRIGHT | `☀️` ou `\u2600` | Brilho |
+| **📄** | PAGE | `📄` ou `\u1F4C4` | Página/dashboard |
+| **🔄** | ERS MODE | `🔄` + `ERS` | Modo ERS |
+| **⛽** | FUEL MIX | `⛽` + `MIX` | Mistura combustível |
+| **⚡** | HARVEST | `⚡` ou `\u26A1` | Recuperação |
+| **🚀** | DEPLOY | `🚀` ou `\u1F680` | Deploy/Envio |
+| **🔥** | HOTLAP | `🔥` ou `\u1F525` | Hotlap |
+
+---
+
+### **🎮 BOTÕES VIRTUAIS (Mapeáveis)**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **🟦** | TC2 | `TC2` | Traction control 2 |
+| **🟧** | TC3 | `TC3` | Traction control 3 |
+| **🟫** | TYRE | `TYRE` | Pneu |
+
+---
+
+### **📊 DASHBOARD / NAVEGAÇÃO**
+| Símbolo | Nome | Código SVG/Unicode | Uso |
+|---------|------|-------------------|-----|
+| **⬅️** | PREV PAGE | `⬅️` ou `\u2B05` | Página anterior |
+| **➡️** | NEXT PAGE | `➡️` ou `\u27A1` | Próxima página |
+| **⬆️** | UP | `⬆️` ou `\u2B06` | Cima |
+| **⬇️** | DOWN | `⬇️` ou `\u2B07` | Baixo |
+| **⏺️** | ENTER | `⏺️` ou `\u23FA` | Confirmar |
+| **✖️** | CANCEL | `✖️` ou `\u2716` | Cancelar |
+| **ℹ️** | INFO | `ℹ️` ou `\u2139` | Informação |
+
+---
+
+## **📌 SUGESTÃO PARA SEU VOLANTE:**
+
+### **Usar símbolos + texto curto:**
+```
+1. 🔄 CLUT    (em vez de CLUTCH)
+2. 🔧 CALIB   (em vez de CALIB)
+3. 🅰️🅱️ ENC   (em vez de ENC MODE)
+4. 🔄 RST     (em vez de RESET)
+
+5. 🎯 BITE    (em vez de BITE)
+6. ☀️ BRT     (em vez de BRIGHT)
+7. 📄 PAGE    (em vez de PAGE)
+8. 🔊 VOL     (em vez de VOL SYS)
+9. 🔊 A       (em vez de VOL A)
+10. 🔊 B      (em vez de VOL B)
+
+11. 🟦 TC2
+12. 🟧 TC3
+13. 🟫 TYRE
+
+14. ⚡ ERS
+15. ⛽ FUEL
+```
+
+### **Exemplo SVG com símbolos:**
+```svg
+<text class="label" transform="rotate(-0) rotate(12) translate(0 -135)">
+  <tspan class="num" x="0" dy="-8">1</tspan>
+  <tspan x="0" dy="16">🔄</tspan>
+  <tspan x="0" dy="16">CLUT</tspan>
+</text>
+```
+
+**Vantagens:**
+- Reconhecimento **instantâneo**
+- Funciona em **qualquer idioma**
+- Mais compacto e legível
+- Padrão universal automotivo

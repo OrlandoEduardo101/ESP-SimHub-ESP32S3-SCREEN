@@ -79,28 +79,28 @@ Sai e volta ao modo navegação
 - Windows reconhece automaticamente
 
 ### 8️⃣ VOL_A (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 56 (UP)
-- **Giro MFC CCW**: Botão HID virtual 57 (DN)
+- **Giro MFC CW**: Botão HID virtual 66 (UP)
+- **Giro MFC CCW**: Botão HID virtual 67 (DN)
 - Mapeia em software de mixer (EarTrumpet, VoiceMeeter)
 
 ### 9️⃣ VOL_B (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 58 (UP)
-- **Giro MFC CCW**: Botão HID virtual 59 (DN)
+- **Giro MFC CW**: Botão HID virtual 68 (UP)
+- **Giro MFC CCW**: Botão HID virtual 69 (DN)
 - Independente de VOL_A, usa software mixer
 
 ### 🔟 TC2 (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 50 (UP)
-- **Giro MFC CCW**: Botão HID virtual 51 (DN)
+- **Giro MFC CW**: Botão HID virtual 60 (UP)
+- **Giro MFC CCW**: Botão HID virtual 61 (DN)
 - Mapeia no jogo para: TC Map Up/Down
 
 ### 1️⃣1️⃣ TC3 (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 52 (UP)
-- **Giro MFC CCW**: Botão HID virtual 53 (DN)
+- **Giro MFC CW**: Botão HID virtual 62 (UP)
+- **Giro MFC CCW**: Botão HID virtual 63 (DN)
 - Mapeia no jogo para: TC 3-way Up/Down
 
 ### 1️⃣2️⃣ TYRE (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 54 (UP)
-- **Giro MFC CCW**: Botão HID virtual 55 (DN)
+- **Giro MFC CW**: Botão HID virtual 64 (UP)
+- **Giro MFC CCW**: Botão HID virtual 65 (DN)
 - Mapeia no jogo para: Compound Up/Down, Tire Pressure, etc
 
 ### 1️⃣3️⃣ ERS (Um clique - F1/Hybrid)
@@ -157,15 +157,15 @@ $CALIB:INVALID:HALL   (calibração inválida, valores resetados)
 
 ---
 
-## 🎛️ Botões Virtuais HID (50-59)
+## 🎛️ Botões Virtuais HID (60-69)
 
 | Botão | Item | CW | CCW | Para Mapear |
 |-------|------|----|----|------------|
-| 50-51 | TC2 | UP | DN | TC Map 1/2/3 |
-| 52-53 | TC3 | UP | DN | TC Range/Mode |
-| 54-55 | TYRE | UP | DN | Compound/Pressure |
-| 56-57 | VOL_A | UP | DN | Software Mixer |
-| 58-59 | VOL_B | UP | DN | Software Mixer |
+| 60-61 | TC2 | UP | DN | TC Map 1/2/3 |
+| 62-63 | TC3 | UP | DN | TC Range/Mode |
+| 64-65 | TYRE | UP | DN | Compound/Pressure |
+| 66-67 | VOL_A | UP | DN | Software Mixer |
+| 68-69 | VOL_B | UP | DN | Software Mixer |
 
 ---
 
@@ -180,7 +180,7 @@ Quando **VOL_SYS** está em modo de ajuste:
 | RADIO | 0xE2 (Mute) | ✅ Sim |
 | FLASH | 0xCD (Play/Pause) | ✅ Sim |
 
-Relatório HID Separado (Report ID 2) para compatibilidade máxima.
+Relatório HID via classe nativa `USBHIDConsumerControl` do framework Espressif32.
 
 ---
 
@@ -218,10 +218,10 @@ Salvos automaticamente:
 ```
 1. Gira MFC → "TC2" aparece
 2. Pressiona MFC → Entra modo ajuste
-3. Gira MFC CW → Envia Botão HID 50
-4. No jogo, mapeia Botão 50 → "TC Map Up"
-5. Gira MFC CCW → Envia Botão HID 51
-6. No jogo, mapeia Botão 51 → "TC Map Down"
+3. Gira MFC CW → Envia Botão HID 60
+4. No jogo, mapeia Botão 60 → "TC Map Up"
+5. Gira MFC CCW → Envia Botão HID 61
+6. No jogo, mapeia Botão 61 → "TC Map Down"
 7. Pressiona MFC → Sai
 ```
 
@@ -232,14 +232,15 @@ Salvos automaticamente:
 ### Pinos Usados
 - **GPIO 14-15**: Encoder MFC A/B
 - **GPIO 43**: UART TX → WT32 GPIO11
-- **GPIO 4-8**: Matrix colunas (RADIO, FLASH buttons aqui)
-- **GPIO 9-13**: Matrix linhas
+- **GPIO 8/9**: I2C SDA/SCL → MCP23017 (matriz 8x8)
+- **MCP23017 GPA0-GPA7**: Matrix colunas
+- **MCP23017 GPB0-GPB7**: Matrix linhas
 
 ### Botões Matrix Especiais
 - **Slot 1**: MFC press (Button 1 HID)
 - **Slot 10**: RADIO/MUTE (Button 10 HID, ou multimídia em VOL_SYS)
 - **Slot 11**: FLASH/PLAY (Button 11 HID, ou multimídia em VOL_SYS)
-- **Slot 25**: SHIFT (interno, não aparece no HID)
+- **Slot 28**: SHIFT (interno, não aparece no HID)
 
 ---
 
@@ -283,8 +284,8 @@ int8_t pageValue = 0;             // Página atual
 - [x] Navegação ciclante (wrap around)
 - [x] Modo ajuste com giro MFC
 - [x] UART para WT32 com valores
-- [x] HID Consumer Control (Report ID 2)
-- [x] Botões virtuais 50-59
+- [x] HID Consumer Control (via USBHIDConsumerControl nativo)
+- [x] Botões virtuais 60-69
 - [x] Multimídia em VOL_SYS (RADIO/FLASH)
 - [x] F1/Hybrid (ERS + FUEL)
 - [x] NVS persistência
@@ -300,8 +301,8 @@ int8_t pageValue = 0;             // Página atual
    - handleMfcRotate() completo
    - handleMfcPress() modo duplo
    - handleMultimediaButtons()
-   - sendConsumerControl()
-   - HID descriptor duplo (Report ID 1+2)
+   - sendConsumerControl() via USBHIDConsumerControl nativo
+   - CustomGamepad (64 botões + 10 eixos) + USBHIDConsumerControl (volume/mídia)
 
 2. **src/main.cpp**
    - processButtonBoxLine() com novos comandos

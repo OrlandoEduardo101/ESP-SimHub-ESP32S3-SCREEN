@@ -17,7 +17,7 @@ extern void debugLog(const String &msg);
  ************************** */
 
 // Number of LEDs in your strip
-#define LED_COUNT 21
+#define LED_COUNT 26
 // Set to 1 to reverse LED order (right to left)
 #define RIGHTTOLEFT 0
 // Set to 1 to light up all LEDs in red at startup (test mode)
@@ -30,7 +30,7 @@ extern void debugLog(const String &msg);
 //  remember, if you don't have an external power supply, your board or USB may not be able
 //  to provide enough power.
 // luminance goes from 0-255, UPDATE AT YOUR OWN RISK
-#define LUMINANCE_LIMIT 30  // Adjust brightness 10-60 as needed
+#define LUMINANCE_LIMIT 50  // Adjust brightness 10-60 as needed
 
 
 // The color order that your LED strip uses
@@ -181,7 +181,7 @@ void neoPixelBusBegin()
         debugLog("[LED]   SetPixelColor() loop completed");
         delay(30);
 
-        debugLog("[LED]   Calling Show() for GREEN...");
+        debugLog("[L ED]   Calling Show() for GREEN...");
         neoLedStrip.Show();
         debugLog("[LED]   ✓ GREEN color is ON - waiting 1000ms");
         delay(1000);
@@ -220,7 +220,7 @@ void neoPixelBusBegin()
             debugLog("[LED]   LED #" + String(i) + " is ON");
             delay(100);
         }
-        debugLog("[LED]   ✓ All 21 LEDs are YELLOW - waiting 500ms");
+        debugLog("[LED]   ✓ All " + String(LED_COUNT) + " LEDs are YELLOW - waiting 500ms");
         delay(500);
 
         // ===== TEST 6: Clear all =====
@@ -364,22 +364,24 @@ uint8_t neoPixelBusGetLuminance() {
 
 /*************************
  * Custom LED Logic for WT32-SC01 Plus
- * 21 LEDs total:
- * - LEDs 0-2 (1-3): Left side - Flags/Alerts/Spotter Left
- * - LEDs 3-17 (4-18): Center - RPM meter (15 LEDs) with DRS indication
- * - LEDs 18-20 (19-21): Right side - Spotter Right/Warnings
+ *
+ * Layout (configurável via defines abaixo):
+ *   [ LEFT_COUNT ] [ RPM_COUNT (calculado) ] [ RIGHT_COUNT ]
+ *
+ * Para alterar a quantidade de LEDs laterais, basta mudar
+ * LED_LEFT_COUNT e/ou LED_RIGHT_COUNT. O centro se ajusta
+ * automaticamente com base em LED_COUNT.
  *************************/
 
-// LED position definitions (0-indexed)
-#define LED_LEFT_1 0
-#define LED_LEFT_2 1
-#define LED_LEFT_3 2
-#define LED_RPM_START 3
-#define LED_RPM_END 17
-#define LED_RPM_COUNT 15
-#define LED_RIGHT_1 18
-#define LED_RIGHT_2 19
-#define LED_RIGHT_3 20
+// ===== CONFIGURAÇÃO DO LAYOUT (edite aqui) =====
+#define LED_LEFT_COUNT  4   // Quantidade de LEDs no lado esquerdo
+#define LED_RIGHT_COUNT 4   // Quantidade de LEDs no lado direito
+
+// Posições derivadas automaticamente — não edite
+#define LED_LEFT_START  0
+#define LED_RPM_START   LED_LEFT_COUNT
+#define LED_RPM_COUNT   (LED_COUNT - LED_LEFT_COUNT - LED_RIGHT_COUNT)
+#define LED_RIGHT_START (LED_LEFT_COUNT + LED_RPM_COUNT)
 
 // Color definitions for flags and alerts
 #define COLOR_FLAG_GREEN RgbColor(0, 255, 0)
@@ -401,6 +403,13 @@ uint8_t neoPixelBusGetLuminance() {
 #define COLOR_RPM_HIGH RgbColor(255, 50, 0)      // Orange for high RPM
 #define COLOR_RPM_REDLINE RgbColor(255, 0, 0)    // Red for redline
 #define COLOR_OFF RgbColor(0, 0, 0)
+
+// Helper: define um intervalo de LEDs com a mesma cor
+inline void setLedsColor(int start, int count, RgbColor color) {
+    for (int i = 0; i < count; i++) {
+        neoLedStrip.SetPixelColor(start + i, color);
+    }
+}
 
 /**
  * Loading animation - displays random patterns while waiting for SimHub connection
@@ -554,26 +563,20 @@ void updateCustomLEDs(
         }
 
         if (show) {
-            neoLedStrip.SetPixelColor(LED_LEFT_1, flagColor);
-            neoLedStrip.SetPixelColor(LED_LEFT_2, flagColor);
-            neoLedStrip.SetPixelColor(LED_LEFT_3, flagColor);
+            setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, flagColor);
         }
     }
 
     // Override with spotter left if car detected
     if (spotterLeft == "1") {
-        neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_SPOTTER);
-        neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_SPOTTER);
-        neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_SPOTTER);
+        setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, COLOR_SPOTTER);
     }
 
     // Override with TC active indicator (traction control cutting power)
     if (tcActive == "1") {
         bool tcBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
         if (tcBlink) {
-            neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_TC_ACTIVE);
-            neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_TC_ACTIVE);
-            neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_TC_ACTIVE);
+            setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, COLOR_TC_ACTIVE);
         }
     }
 
@@ -581,9 +584,7 @@ void updateCustomLEDs(
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
         if (alertBlink) {
-            neoLedStrip.SetPixelColor(LED_LEFT_1, COLOR_ALERT_CRITICAL);
-            neoLedStrip.SetPixelColor(LED_LEFT_2, COLOR_ALERT_CRITICAL);
-            neoLedStrip.SetPixelColor(LED_LEFT_3, COLOR_ALERT_CRITICAL);
+            setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, COLOR_ALERT_CRITICAL);
         }
     }
 
@@ -644,9 +645,7 @@ void updateCustomLEDs(
         }
 
         if (show) {
-            neoLedStrip.SetPixelColor(LED_RIGHT_1, flagColor);
-            neoLedStrip.SetPixelColor(LED_RIGHT_2, flagColor);
-            neoLedStrip.SetPixelColor(LED_RIGHT_3, flagColor);
+            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, flagColor);
         }
     }
 
@@ -654,26 +653,20 @@ void updateCustomLEDs(
     if (shiftLightTrigger) {
         bool shiftBlink = (millis() / 100) % 2 == 0;
         if (shiftBlink) {
-            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_RPM_REDLINE);
-            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_RPM_REDLINE);
-            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_RPM_REDLINE);
+            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, COLOR_RPM_REDLINE);
         }
     }
 
     // Override with spotter right if car detected (higher priority)
     if (spotterRight == "1") {
-        neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_SPOTTER);
-        neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_SPOTTER);
-        neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_SPOTTER);
+        setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, COLOR_SPOTTER);
     }
 
     // Override with ABS active indicator (ABS cutting brake pressure)
     if (absActive == "1") {
         bool absBlink = (millis() / 100) % 2 == 0;  // Fast 10Hz blink
         if (absBlink) {
-            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_ABS_ACTIVE);
-            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_ABS_ACTIVE);
-            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_ABS_ACTIVE);
+            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, COLOR_ABS_ACTIVE);
         }
     }
 
@@ -681,9 +674,7 @@ void updateCustomLEDs(
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
         if (alertBlink) {
-            neoLedStrip.SetPixelColor(LED_RIGHT_1, COLOR_ALERT_CRITICAL);
-            neoLedStrip.SetPixelColor(LED_RIGHT_2, COLOR_ALERT_CRITICAL);
-            neoLedStrip.SetPixelColor(LED_RIGHT_3, COLOR_ALERT_CRITICAL);
+            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, COLOR_ALERT_CRITICAL);
         }
     }
 

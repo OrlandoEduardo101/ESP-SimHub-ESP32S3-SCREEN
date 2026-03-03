@@ -1,0 +1,489 @@
+<svg width="210mm" height="297mm" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+
+    <style>
+      .btn-text { font-family: Arial, sans-serif; font-size: 3px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle; }
+      .btn-text-arrow { font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle; }
+      .btn-arrow { fill: #FFF; }
+      .btn-symbol { fill: #FFF; }
+      .thumb-text { font-family: Arial, sans-serif; font-size: 3.8px; font-weight: 900; fill: #FFF; text-anchor: middle; }
+      .border-cut { stroke: #444; stroke-width: 0.1; fill: none; }
+      .thumb-marker { stroke: #f5c133; stroke-width: 0.65; stroke-linecap: round; }
+
+      .color-blk { fill: #2f0303; }
+      .color-drs { fill: #27AE60; }
+      .color-pit { fill: #E74C3C; }
+      .color-fcy { fill: #dbad2e; }
+      .color-radio { fill: #2980B9; }
+      .color-neutral { fill: #95A5A6; }
+      .color-eng { fill: #8E44AD; }
+      .color-abs { fill: #D35400; }
+    </style>
+
+    <g id="btn-8mm">
+      <circle r="4" class="label-bg" />
+      <circle r="4" class="border-cut" />
+    </g>
+
+    <g id="thumb-label">
+      <rect x="-8" y="-3" width="16" height="6" rx="1" class="label-bg" />
+      <rect x="-8" y="-3" width="16" height="6" rx="1" class="border-cut" />
+      <line x1="0" y1="-3" x2="0" y2="-1.0" class="thumb-marker" />
+    </g>
+
+  </defs>
+
+  <text x="10" y="15" style="font-family:Arial; font-size:5px; font-weight:bold;">BOTÕES FRONTÁIS (8mm)</text>
+
+  <g transform="translate(15, 25)">
+
+    <!-- linha 1 -->
+    <g transform="translate(0,0)">   <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">PIT</text></g>
+    <g transform="translate(10,0)">  <use href="#btn-8mm" class="color-drs"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.8px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DRS</text></g>
+    <g transform="translate(20,0)">  <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.8px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">FCY</text></g>
+    <g transform="translate(30,0)">  <use href="#btn-8mm" class="color-pit"/> <text class="btn-text">STOP</text></g>
+    <g transform="translate(40,0)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">FLASH</text></g>
+
+    <!-- linha 2 -->
+    <g transform="translate(0,10)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">IGN</text></g>
+    <g transform="translate(10,10)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">STRT</text></g>
+    <g transform="translate(20,10)"> <use href="#btn-8mm" class="color-drs"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 7.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">N</text></g>
+    <g transform="translate(30,10)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">WIPE</text></g>
+    <g transform="translate(40,10)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">RAD</text></g>
+
+    <!-- linha 3 -->
+    <g transform="translate(0,20)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">DASH</text></g>
+    <g transform="translate(10,20)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">PAGE</text></g>
+    <g transform="translate(20,20)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">OK</text></g>
+    <g transform="translate(30,20)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">BACK</text></g>
+    <g transform="translate(40,20)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">MENU</text></g>
+
+    <!-- linha 4 NOVA -->
+    <g transform="translate(0,30)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TC</text></g>
+    <g transform="translate(10,30)"> <use href="#btn-8mm" class="color-abs"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">ABS</text></g>
+    <g transform="translate(20,30)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">MAP</text></g>
+    <g transform="translate(30,30)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">BOOST</text></g>
+    <g transform="translate(40,30)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">ERS</text></g>
+
+    <!-- linha 5 NOVA -->
+    <g transform="translate(0,40)">  <use href="#btn-8mm" class="color-drs"/> <text class="btn-text">OVTK</text></g>
+    <g transform="translate(10,40)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">LIGHT</text></g>
+    <g transform="translate(20,40)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">FAN</text></g>
+    <g transform="translate(30,40)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DRINK</text></g>
+    <g transform="translate(40,40)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">RESET</text></g>
+
+    <!-- linha 6 NOVA -->
+    <g transform="translate(0,50)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">LEFT</text></g>
+    <g transform="translate(10,50)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">RIGHT</text></g>
+    <g transform="translate(20,50)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="-2.2,0 0.2,-1.4 0.2,-0.6 2.0,-0.6 2.0,0.6 0.2,0.6 0.2,1.4"/></g>
+    <g transform="translate(30,50)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="2.2,0 -0.2,-1.4 -0.2,-0.6 -2.0,-0.6 -2.0,0.6 -0.2,0.6 -0.2,1.4"/></g>
+    <g transform="translate(40,50)"> <use href="#btn-8mm" class="color-fcy"/>
+      <rect x="-1.6" y="-0.5" width="3.2" height="1" class="btn-symbol"/>
+      <rect x="-0.5" y="-1.6" width="1" height="3.2" class="btn-symbol"/>
+    </g>
+
+    <!-- linha 7 NOVA -->
+    <g transform="translate(0,60)">  <use href="#btn-8mm" class="color-fcy"/>
+      <rect x="-1.8" y="-0.5" width="3.6" height="1" class="btn-symbol"/>
+    </g>
+    <g transform="translate(10,60)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">UP</text></g>
+    <g transform="translate(20,60)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DOWN</text></g>
+    <!-- <g transform="translate(20,60)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">DOWN</text></g> -->
+    <g transform="translate(30,60)"> <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">CAM</text></g>
+    <g transform="translate(40,60)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">PTT</text></g>
+
+    <!-- linha 8 NOVA -->
+    <g transform="translate(0,70)">  <use href="#btn-8mm" class="color-neutral"/>
+      <polygon class="btn-symbol" points="-1.2,-1.6 -1.2,1.6 1.6,0"/>
+    </g>
+    <g transform="translate(10,70)"> <use href="#btn-8mm" class="color-neutral"/>
+      <rect x="-1.4" y="-1.6" width="0.8" height="3.2" class="btn-symbol"/>
+      <rect x="0.6" y="-1.6" width="0.8" height="3.2" class="btn-symbol"/>
+    </g>
+    <g transform="translate(20,70)"> <use href="#btn-8mm" class="color-neutral"/>
+      <rect x="-1.2" y="-1.2" width="2.4" height="2.4" class="btn-symbol"/>
+    </g>
+    <g transform="translate(30,70)"> <use href="#btn-8mm" class="color-neutral"/>
+      <polygon class="btn-symbol" points="1.6,-1.6 1.6,1.6 -0.6,0"/>
+      <rect x="-1.6" y="-1.6" width="0.6" height="3.2" class="btn-symbol"/>
+    </g>
+    <g transform="translate(40,70)"> <use href="#btn-8mm" class="color-neutral"/>
+      <polygon class="btn-symbol" points="-1.6,-1.6 -1.6,1.6 0.6,0"/>
+      <rect x="1.0" y="-1.6" width="0.6" height="3.2" class="btn-symbol"/>
+    </g>
+
+    <!-- linha 9 NOVA -->
+    <g transform="translate(0,80)">  <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">REC</text></g>
+    <g transform="translate(10,80)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">MUTE</text></g>
+    <g transform="translate(20,80)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">VOL-</text></g>
+    <g transform="translate(30,80)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">VOL+</text></g>
+    <g transform="translate(40,80)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">AUX</text></g>
+
+    <!-- linha 10 NOVA -->
+    <g transform="translate(0,90)">  <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">R</text></g>
+    <g transform="translate(10,90)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">OV</text></g>
+    <g transform="translate(20,90)"> <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4.0px; font-weight: 900; fill: #000; text-anchor: middle; dominant-baseline: middle;">PIT</text></g>
+    <g transform="translate(30,90)"> <use href="#btn-8mm" class="color-drs"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">N</text></g>
+    <g transform="translate(40,90)"> <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">R</text></g>
+
+    <!-- linha 11 NOVA -->
+    <g transform="translate(0,100)">  <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TC+</text></g>
+    <g transform="translate(10,100)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TC-</text></g>
+    <g transform="translate(20,100)"> <use href="#btn-8mm" class="color-abs"/> <text class="btn-text">ABS+</text></g>
+    <g transform="translate(30,100)"> <use href="#btn-8mm" class="color-abs"/> <text class="btn-text">ABS-</text></g>
+    <g transform="translate(40,100)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">MAP-</text></g>
+
+    <!-- Bloco B (colunas 6-10) -->
+    <g transform="translate(60,0)">
+      <g transform="translate(0,0)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="-2.2,0 0.2,-1.4 0.2,-0.6 2.0,-0.6 2.0,0.6 0.2,0.6 0.2,1.4"/></g>
+      <g transform="translate(10,0)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="2.2,0 -0.2,-1.4 -0.2,-0.6 -2.0,-0.6 -2.0,0.6 -0.2,0.6 -0.2,1.4"/></g>
+      <g transform="translate(20,0)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="2.2,0 -0.2,-1.4 -0.2,-0.6 -2.0,-0.6 -2.0,0.6 -0.2,0.6 -0.2,1.4"/></g>
+      <g transform="translate(30,0)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="2.2,0 -0.2,-1.4 -0.2,-0.6 -2.0,-0.6 -2.0,0.6 -0.2,0.6 -0.2,1.4"/></g>
+      <g transform="translate(40,0)"> <use href="#btn-8mm" class="color-neutral"/> <polygon class="btn-arrow" points="2.2,0 -0.2,-1.4 -0.2,-0.6 -2.0,-0.6 -2.0,0.6 -0.2,0.6 -0.2,1.4"/></g>
+
+      <g transform="translate(0,10)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">NAV</text></g>
+      <g transform="translate(10,10)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">GPS</text></g>
+      <g transform="translate(20,10)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">TRIP</text></g>
+      <g transform="translate(30,10)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">TEMP</text></g>
+      <g transform="translate(40,10)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">FUEL</text></g>
+
+      <g transform="translate(0,20)">  <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">OIL</text></g>
+      <g transform="translate(10,20)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">WATR</text></g>
+      <g transform="translate(20,20)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">BATT</text></g>
+      <g transform="translate(30,20)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">ALT</text></g>
+      <g transform="translate(40,20)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">RPM</text></g>
+
+      <g transform="translate(0,30)">  <use href="#btn-8mm" class="color-abs"/> <text class="btn-text">GEAR</text></g>
+      <g transform="translate(10,30)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">MIX</text></g>
+      <g transform="translate(20,30)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">ENG</text></g>
+      <g transform="translate(30,30)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">TCUT</text></g>
+      <g transform="translate(40,30)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">TSLP</text></g>
+
+      <g transform="translate(0,40)">  <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">STRAT</text></g>
+      <g transform="translate(10,40)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SOC</text></g>
+      <g transform="translate(20,40)"> <use href="#btn-8mm" class="color-drs"/> <text class="btn-text">DEPL</text></g>
+      <g transform="translate(30,40)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">HARV</text></g>
+      <g transform="translate(40,40)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">HERV</text></g>
+
+      <g transform="translate(0,50)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">MODE</text></g>
+      <g transform="translate(10,50)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">SWAP</text></g>
+      <g transform="translate(20,50)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">SAVE</text></g>
+      <g transform="translate(30,50)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">LOAD</text></g>
+      <g transform="translate(40,50)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">RSET</text></g>
+
+      <g transform="translate(0,60)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">VIEW</text></g>
+      <g transform="translate(10,60)"> <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">CAM</text></g>
+      <g transform="translate(20,60)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">HUD</text></g>
+      <g transform="translate(30,60)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">MAPS</text></g>
+      <g transform="translate(40,60)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">INFO</text></g>
+
+      <g transform="translate(0,70)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">WIPR</text></g>
+      <g transform="translate(10,70)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">WASH</text></g>
+      <g transform="translate(20,70)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">DEFR</text></g>
+      <g transform="translate(30,70)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">FAN+</text></g>
+      <g transform="translate(40,70)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">FAN-</text></g>
+
+      <g transform="translate(0,80)">  <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">BIAS+</text></g>
+      <g transform="translate(10,80)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">BIAS-</text></g>
+      <g transform="translate(20,80)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">BRAK</text></g>
+      <g transform="translate(30,80)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">CLUT</text></g>
+      <g transform="translate(40,80)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">BITE</text></g>
+
+      <g transform="translate(0,90)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">CAL</text></g>
+      <g transform="translate(10,90)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SET</text></g>
+      <g transform="translate(20,90)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">ENTR</text></g>
+      <g transform="translate(30,90)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">CANC</text></g>
+      <g transform="translate(40,90)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SHIFT</text></g>
+
+      <g transform="translate(0,100)"> <use href="#btn-8mm" class="color-fcy"/> <text class="btn-text">PLUS</text></g>
+      <g transform="translate(10,100)"> <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">MIN</text></g>
+      <g transform="translate(20,100)"> <use href="#btn-8mm" class="color-fcy"/> <text class="btn-text">BRIT</text></g>
+      <g transform="translate(30,100)"> <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DIM</text></g>
+      <g transform="translate(40,100)"> <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SHIFT</text></g>
+    </g>
+
+    <!-- Bloco C (colunas 11-15) -->
+    <g transform="translate(120,0)">
+      <g transform="translate(0,0)">   <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">HL</text></g>
+      <g transform="translate(10,0)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">HI</text></g>
+      <g transform="translate(20,0)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 5.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">LO</text></g>
+      <g transform="translate(30,0)">  <use href="#btn-8mm" class="color-abs"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">FOG</text></g>
+      <g transform="translate(40,0)">  <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">HAZ</text></g>
+
+      <g transform="translate(0,10)">  <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">MAP+</text></g>
+      <g transform="translate(10,10)"> <use href="#btn-8mm" class="color-eng"/> <text class="btn-text">MAP-</text></g>
+      <g transform="translate(20,10)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TC+</text></g>
+      <g transform="translate(30,10)"> <use href="#btn-8mm" class="color-eng"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TC-</text></g>
+      <g transform="translate(40,10)"> <use href="#btn-8mm" class="color-abs"/> <text class="btn-text">ABS+</text></g>
+
+      <g transform="translate(0,20)">  <use href="#btn-8mm" class="color-abs"/> <text class="btn-text">ABS-</text></g>
+      <g transform="translate(10,20)"> <use href="#btn-8mm" class="color-drs"/> <text class="btn-text">HORN</text></g>
+      <g transform="translate(20,20)"> <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">LIM</text></g>
+      <g transform="translate(30,20)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">PUSH</text></g>
+      <g transform="translate(40,20)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">TEAM</text></g>
+
+      <g transform="translate(0,30)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">SYNC</text></g>
+      <g transform="translate(10,30)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">PAIR</text></g>
+      <g transform="translate(20,30)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">LINK</text></g>
+      <g transform="translate(30,30)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">LOCK</text></g>
+      <g transform="translate(40,30)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">SAFE</text></g>
+
+      <g transform="translate(0,40)">  <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">PARK</text></g>
+      <g transform="translate(10,40)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">HOLD</text></g>
+      <g transform="translate(20,40)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">AUTO</text></g>
+      <g transform="translate(30,40)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4.50px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">OK</text></g>
+      <g transform="translate(40,40)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">BACK</text></g>
+
+
+    <g transform="translate(0,50)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 4.0px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">UP</text></g>
+    <g transform="translate(10,50)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DOWN</text></g>
+
+      <g transform="translate(20,50)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">STRT</text></g>
+      <g transform="translate(30,50)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">AUX</text></g>
+      <g transform="translate(40,50)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">DRINK</text></g>
+
+      <g transform="translate(0,60)">  <use href="#btn-8mm" class="color-pit"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">REC</text></g>
+      <g transform="translate(10,60)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">MUTE</text></g>
+      <g transform="translate(20,60)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">VOL-</text></g>
+      <g transform="translate(30,60)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">VOL+</text></g>
+      <g transform="translate(40,60)"> <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SPK</text></g>
+
+      <g transform="translate(0,70)">  <use href="#btn-8mm" class="color-radio"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">MIC</text></g>
+      <g transform="translate(10,70)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">TALK</text></g>
+      <g transform="translate(20,70)"> <use href="#btn-8mm" class="color-radio"/> <text class="btn-text">CHAT</text></g>
+      <g transform="translate(30,70)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">TIME</text></g>
+      <g transform="translate(40,70)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">TIMER</text></g>
+
+      <g transform="translate(0,80)">  <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">ALERT</text></g>
+      <g transform="translate(10,80)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">NOTIF</text></g>
+      <g transform="translate(20,80)"> <use href="#btn-8mm" class="color-neutral"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.2px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">LOW</text></g>
+      <g transform="translate(30,80)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">HOST</text></g>
+      <g transform="translate(40,80)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">GUEST</text></g>
+
+      <g transform="translate(0,90)">  <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">REP</text></g>
+      <g transform="translate(10,90)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">BAN</text></g>
+      <g transform="translate(20,90)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">MOD</text></g>
+      <g transform="translate(30,90)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">CLEAN</text></g>
+      <g transform="translate(40,90)"> <use href="#btn-8mm" class="color-blk"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 3.5px; font-weight: 900; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">LOG</text></g>
+
+      <g transform="translate(0,100)"> <use href="#btn-8mm" class="color-fcy"/> <text x="0" y="0.5" style="font-family: Arial, sans-serif; font-size: 2.2px; font-weight: 800; fill: #FFF; text-anchor: middle; dominant-baseline: middle;">SETUP</text></g>
+      <g transform="translate(10,100)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">EXIT</text></g>
+      <g transform="translate(20,100)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">NEXT</text></g>
+      <g transform="translate(30,100)"> <use href="#btn-8mm" class="color-neutral"/> <text class="btn-text">PREV</text></g>
+      <g transform="translate(40,100)"> <use href="#btn-8mm" class="color-blk"/> <text class="btn-text">HOME</text></g>
+    </g>
+
+  </g>
+
+  <text x="10" y="138" style="font-family:Arial; font-size:4px; font-weight:bold;">STREAMING / MEDIA / UTILITIES (RETANGULARES 7.5×5mm)</text>
+
+  <g transform="translate(15, 146)">
+    <!-- Linha 1: Discord/Streaming + Media Controls -->
+    <g transform="translate(0,0)">   <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">DISC</text></g>
+    <g transform="translate(9,0)">   <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">VOIC</text></g>
+    <g transform="translate(18,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CH+</text></g>
+    <g transform="translate(27,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CH-</text></g>
+    <g transform="translate(36,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.8px; font-weight:900; fill:#FFF; text-anchor:middle;">YT</text></g>
+    <g transform="translate(45,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.2px; font-weight:900; fill:#FFF; text-anchor:middle;">TWCH</text></g>
+    <g transform="translate(54,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">STM</text></g>
+    <g transform="translate(63,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">HORN</text></g>
+    <g transform="translate(72,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.65" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">▶⏸</text></g>
+    <g transform="translate(81,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.65" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">▶</text></g>
+    <g transform="translate(90,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.65" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">⏸</text></g>
+    <g transform="translate(99,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.65" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">⏹</text></g>
+    <g transform="translate(108,0)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.65" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">⏺</text></g>
+    <g transform="translate(117,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2px; font-weight:900; fill:#FFF; text-anchor:middle;">SCRSH</text></g>
+    <g transform="translate(126,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">GIF</text></g>
+    <g transform="translate(135,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.75" y="-1" width="3.5" height="2.25" rx="0.25" fill="none" stroke="#FFF" stroke-width="0.35"/><circle cx="0" cy="0.25" r="0.7" fill="none" stroke="#FFF" stroke-width="0.35"/><circle cx="1.25" cy="-0.6" r="0.25" fill="#FFF"/></svg></g>
+    <g transform="translate(144,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">PNG</text></g>
+    <g transform="translate(153,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">PDF</text></g>
+    <g transform="translate(162,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">F5</text></g>
+    <g transform="translate(171,0)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">F11</text></g>
+
+    <!-- Linha 2: OBS/Recording + Media Navigation -->
+    <g transform="translate(0,7.5)">   <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">OBS</text></g>
+    <g transform="translate(9,7.5)">   <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">REC</text></g>
+    <g transform="translate(18,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">STOP</text></g>
+    <g transform="translate(27,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">LIVE</text></g>
+    <g transform="translate(36,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CLIP</text></g>
+    <g transform="translate(45,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SC+</text></g>
+    <g transform="translate(54,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SC-</text></g>
+    <g transform="translate(63,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SAVE</text></g>
+    <g transform="translate(72,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">⏭</text></g>
+    <g transform="translate(81,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:5px; font-weight:900; fill:#FFF; text-anchor:middle;">↻</text></g>
+    <g transform="translate(90,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.75" style="font-family:Arial; font-size:5px; font-weight:900; fill:#FFF; text-anchor:middle;">⇆</text></g>
+    <g transform="translate(99,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:5px; font-weight:900; fill:#FFF; text-anchor:middle;">↺</text></g>
+    <g transform="translate(108,7.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">COPY</text></g>
+    <g transform="translate(117,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2px; font-weight:900; fill:#FFF; text-anchor:middle;">PASTE</text></g>
+    <g transform="translate(126,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">UNDO</text></g>
+    <g transform="translate(135,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">REDO</text></g>
+    <g transform="translate(144,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SLCT</text></g>
+    <g transform="translate(153,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">FIND</text></g>
+    <g transform="translate(162,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CTRL</text></g>
+    <g transform="translate(171,7.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.8" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">ALT</text></g>
+
+    <!-- Linha 3: Audio/Video + Volume Controls -->
+    <g transform="translate(0,15)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.8px; font-weight:900; fill:#FFF; text-anchor:middle;">MIC</text></g>
+    <g transform="translate(9,15)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">MUTE</text></g>
+    <g transform="translate(18,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">VOL+</text></g>
+    <g transform="translate(27,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">VOL-</text></g>
+    <g transform="translate(36,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CAM</text></g>
+    <g transform="translate(45,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">VIRT</text></g>
+    <g transform="translate(54,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SCRN</text></g>
+    <g transform="translate(63,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">FLTR</text></g>
+    <g transform="translate(72,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.85" y="-0.6" width="0.75" height="1.25" fill="#FFF"/><polygon points="-1.1,-0.85 -0.25,-1.25 0.25,-1.25 0.25,1.25 -0.25,1.25 -1.1,0.85" fill="#FFF"/><path d="M 0.6,-0.75 Q 1.1,0 0.6,0.75" stroke="#FFF" stroke-width="0.25" fill="none" stroke-linecap="round"/><path d="M 1.1,-1.1 Q 1.75,0 1.1,1.1" stroke="#FFF" stroke-width="0.25" fill="none" stroke-linecap="round"/><path d="M 1.6,-1.5 Q 2.35,0 1.6,1.5" stroke="#FFF" stroke-width="0.25" fill="none" stroke-linecap="round"/></svg></g>
+    <g transform="translate(81,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.85" y="-0.6" width="0.75" height="1.25" fill="#FFF"/><polygon points="-1.1,-0.85 -0.25,-1.25 0.25,-1.25 0.25,1.25 -0.25,1.25 -1.1,0.85" fill="#FFF"/><path d="M 0.75,-1.25 L 1.85,1.1" stroke="#FFF" stroke-width="0.3" fill="none" stroke-linecap="round"/></svg></g>
+    <g transform="translate(90,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">╋</text></g>
+    <g transform="translate(99,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">━</text></g>
+    <g transform="translate(108,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">TAB+</text></g>
+    <g transform="translate(117,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">TAB-</text></g>
+    <g transform="translate(126,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><path d="M 1,-0.6 Q 0.6,0 1,0.6" stroke="#FFF" stroke-width="0.25" fill="none" stroke-linecap="round"/><path d="M -1,0.6 Q -0.6,0 -1,-0.6" stroke="#FFF" stroke-width="0.25" fill="none" stroke-linecap="round"/><path d="M 0.6,-1 L 1.25,0 L 0.6,1" fill="none" stroke="#FFF" stroke-width="0.25" stroke-linejoin="round"/><path d="M -0.6,1 L -1.25,0 L -0.6,-1" fill="none" stroke="#FFF" stroke-width="0.25" stroke-linejoin="round"/></svg></g>
+    <g transform="translate(135,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <svg x="-4" y="-2.75" width="8.5" height="6" viewBox="-3.75 -2.5 7.5 5"><polygon points="0,-1.5 -1.25,0 1.25,0" fill="#FFF"/><rect x="-1" y="0" width="2" height="1.25" fill="#FFF"/><rect x="-0.4" y="0.25" width="0.75" height="1" fill="#000"/></svg></g>
+    <g transform="translate(144,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.2" style="font-family:Arial; font-size:3.5px; font-weight:900; fill:#FFF; text-anchor:middle;">PTT</text></g>
+    <g transform="translate(153,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">DEAF</text></g>
+    <g transform="translate(162,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.2px; font-weight:900; fill:#FFF; text-anchor:middle;">ZOOM</text></g>
+    <g transform="translate(171,15)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.2px; font-weight:900; fill:#FFF; text-anchor:middle;">MEET</text></g>
+
+    <!-- Linha 4: Chat/Interaction + Speed Controls -->
+    <g transform="translate(0,22.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CHAT</text></g>
+    <g transform="translate(9,22.5)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">MSG</text></g>
+    <g transform="translate(18,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-radio" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CALL</text></g>
+    <g transform="translate(27,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.0px; font-weight:900; fill:#FFF; text-anchor:middle;">NODUP</text></g>
+    <g transform="translate(36,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.2px; font-weight:900; fill:#FFF; text-anchor:middle;">DELAY</text></g>
+    <g transform="translate(45,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">MOD</text></g>
+    <g transform="translate(54,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-blk" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">BAN</text></g>
+    <g transform="translate(63,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-fcy" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SETP</text></g>
+    <g transform="translate(72,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">0.5X</text></g>
+    <g transform="translate(81,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">1X</text></g>
+    <g transform="translate(90,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">1.5X</text></g>
+    <g transform="translate(99,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">2X</text></g>
+    <g transform="translate(108,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">LOCK</text></g>
+    <g transform="translate(117,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SLEEP</text></g>
+    <g transform="translate(126,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">PG↑</text></g>
+    <g transform="translate(135,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">PG↓</text></g>
+    <g transform="translate(144,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">END</text></g>
+    <g transform="translate(153,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1" style="font-family:Arial; font-size:2px; font-weight:900; fill:#FFF; text-anchor:middle;">HOME</text></g>
+    <g transform="translate(162,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.5" style="font-family:Arial; font-size:4px; font-weight:900; fill:#FFF; text-anchor:middle;">INS</text></g>
+    <g transform="translate(171,22.5)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.25" style="font-family:Arial; font-size:3px; font-weight:900; fill:#FFF; text-anchor:middle;">PRNT</text></g>
+
+    <!-- Linha 5: System & App Controls -->
+    <g transform="translate(0,30)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">APPS</text></g>
+    <g transform="translate(9,30)">  <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">TASK</text></g>
+    <g transform="translate(18,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">DESK</text></g>
+    <g transform="translate(27,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><circle cx="0" cy="0" r="1.25" fill="none" stroke="#FFF" stroke-width="0.25"/><path d="M -1.25,0 L 1.25,0" stroke="#FFF" stroke-width="0.2"/><path d="M 0,-1.25 L 0,1.25" stroke="#FFF" stroke-width="0.2"/><path d="M -0.85,-0.4 Q 0,0.5 0.85,0.4" stroke="#FFF" stroke-width="0.2" fill="none"/><path d="M -0.85,0.4 Q 0,-0.5 0.85,-0.4" stroke="#FFF" stroke-width="0.2" fill="none"/></svg></g>
+    <g transform="translate(36,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.75" y="-0.85" width="3.5" height="1.85" rx="0.2" fill="none" stroke="#FFF" stroke-width="0.3"/><path d="M -1.75,-0.85 L 0,0.4 L 1.75,-0.85" fill="none" stroke="#FFF" stroke-width="0.3"/><path d="M 0,0.4 L 0,1" stroke="#FFF" stroke-width="0.3" stroke-linecap="round"/></svg></g>
+    <g transform="translate(45,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><ellipse cx="-0.25" cy="-0.25" rx="1.25" ry="0.85" fill="none" stroke="#FFF" stroke-width="0.25"/><path d="M 1,0.25 L 1.5,0.85 L 0.75,0.6 Z" fill="#FFF"/></svg></g>
+    <g transform="translate(54,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.25" y="-0.25" width="2.5" height="1.5" fill="none" stroke="#FFF" stroke-width="0.25"/><rect x="-0.85" y="-0.6" width="1" height="0.4" fill="none" stroke="#FFF" stroke-width="0.25"/><path d="M -1.25,-0.25 L 1.25,-0.25" stroke="#FFF" stroke-width="0.2"/></svg></g>
+    <g transform="translate(63,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><circle cx="0" cy="0" r="0.6" fill="none" stroke="#FFF" stroke-width="0.25"/><path d="M 0,-1.5 L 0,-0.6 M -1,-1 L -0.45,-0.45 M 1,-1 L 0.45,-0.45 M -1,1 L -0.45,0.45 M 1,1 L 0.45,0.45 M 0,0.6 L 0,1.5 M -1.5,0 L -0.6,0 M 1.5,0 L 0.6,0" stroke="#FFF" stroke-width="0.2" stroke-linecap="round"/></svg></g>
+    <g transform="translate(72,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><path d="M 0.6,-1.25 Q -1,0 0.6,1.25" stroke="#FFF" stroke-width="0.45" fill="none" stroke-linecap="round"/></svg></g>
+    <g transform="translate(81,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1.25" y="-0.85" width="2.5" height="1.5" rx="0.15" fill="none" stroke="#FFF" stroke-width="0.25"/><rect x="-0.85" y="0.6" width="1.75" height="0.4" fill="#FFF"/><circle cx="0" cy="-0.15" r="0.15" fill="#FFF"/></svg></g>
+    <g transform="translate(90,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-abs" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><rect x="-1" y="-0.6" width="2" height="1.25" rx="0.15" fill="none" stroke="#FFF" stroke-width="0.25"/><rect x="-0.75" y="-0.4" width="1.5" height="0.75" fill="#FFF"/><rect x="1" y="-0.25" width="0.25" height="0.5" fill="#FFF"/></svg></g>
+    <g transform="translate(99,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.25" style="font-family:Arial; font-size:3.5px; font-weight:900; fill:#FFF; text-anchor:middle;">MIN</text></g>
+    <g transform="translate(108,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="1.25" style="font-family:Arial; font-size:3.5px; font-weight:900; fill:#FFF; text-anchor:middle;">MAX</text></g>
+    <g transform="translate(117,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SNP←</text></g>
+    <g transform="translate(126,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-neutral" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">SNP→</text></g>
+    <g transform="translate(135,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-pit" stroke="#FFF" stroke-width="0.3"/> <svg x="-3.75" y="-2.5" width="7.5" height="5" viewBox="-3.75 -2.5 7.5 5"><path d="M -1,-1 L 1,1 M 1,-1 L -1,1" stroke="#FFF" stroke-width="0.4" stroke-linecap="round"/></svg></g>
+    <g transform="translate(144,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CODE</text></g>
+    <g transform="translate(153,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">TERM</text></g>
+    <g transform="translate(162,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">CALC</text></g>
+    <g transform="translate(171,30)"> <rect x="-3.75" y="-2.5" width="7.5" height="5" rx="0.6" class="color-eng" stroke="#FFF" stroke-width="0.3"/> <text x="0" y="0.8" style="font-family:Arial; font-size:2.5px; font-weight:900; fill:#FFF; text-anchor:middle;">NOTE</text></g>
+  </g>
+
+  <text x="10" y="188" style="font-family:Arial; font-size:5px; font-weight:bold;">ENCODERS LATERAIS (THUMBS)</text>
+
+  <g transform="translate(18, 195)">
+
+    <!-- existentes -->
+    <g transform="translate(0,0)">   <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">DIFF IN</text></g>
+    <g transform="translate(20,0)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">DIFF MID</text></g>
+    <g transform="translate(40,0)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">DIFF OUT</text></g>
+    <g transform="translate(60,0)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">DIFF OUT</text></g>
+
+    <g transform="translate(0,10)">  <use href="#thumb-label" class="color-abs"/> <text y="1" class="thumb-text">E-BRAKE</text></g>
+    <g transform="translate(20,10)"> <use href="#thumb-label" class="color-radio"/> <text y="1" class="thumb-text">B-MIG</text></g>
+    <g transform="translate(40,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">MIX</text></g>
+    <g transform="translate(60,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">MIX</text></g>
+
+    <g transform="translate(0,20)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">MFD</text></g>
+    <g transform="translate(20,20)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">SCROLL</text></g>
+    <g transform="translate(40,20)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">PITCH</text></g>
+    <g transform="translate(60,20)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">PITCH</text></g>
+
+    <!-- novos -->
+    <g transform="translate(0,30)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">TC CUT</text></g>
+    <g transform="translate(20,30)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">TC SLIP</text></g>
+    <g transform="translate(40,30)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">ENGINE</text></g>
+    <g transform="translate(60,30)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">ENGINE</text></g>
+
+    <g transform="translate(0,40)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">STRAT</text></g>
+    <g transform="translate(20,40)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">FUEL</text></g>
+    <g transform="translate(40,40)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BOOST</text></g>
+    <g transform="translate(60,40)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BOOST</text></g>
+
+    <g transform="translate(0,50)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">TORQUE</text></g>
+    <g transform="translate(0,50)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">TORQUE</text></g>
+    <g transform="translate(20,50)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">SOC</text></g>
+    <g transform="translate(40,50)"> <use href="#thumb-label" class="color-drs"/> <text y="1" class="thumb-text">DEPLOY</text></g>
+    <g transform="translate(60,50)"> <use href="#thumb-label" class="color-drs"/> <text y="1" class="thumb-text">DEPLOY</text></g>
+
+  </g>
+
+  <g transform="translate(118, 195)">
+    <g transform="translate(-20,0)">   <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BIAS+</text></g>
+    <g transform="translate(0,0)">   <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BIAS+</text></g>
+    <g transform="translate(20,0)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BIAS-</text></g>
+    <g transform="translate(40,0)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">CLUT</text></g>
+
+    <g transform="translate(-20,10)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">BITE</text></g>
+    <g transform="translate(0,10)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">BITE</text></g>
+    <g transform="translate(20,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">CAL</text></g>
+    <g transform="translate(40,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">SET</text></g>
+
+    <g transform="translate(-20,20)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">PAGE</text></g>
+    <g transform="translate(0,20)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">PAGE</text></g>
+    <g transform="translate(20,20)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">INFO</text></g>
+    <g transform="translate(40,20)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">NAV</text></g>
+
+    <g transform="translate(-20,30)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">WIPER</text></g>
+    <g transform="translate(0,30)">  <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">WIPER</text></g>
+    <g transform="translate(20,30)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">WASH</text></g>
+    <g transform="translate(40,30)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">TEMP</text></g>
+
+    <g transform="translate(-20,40)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">FUEL</text></g>
+    <g transform="translate(0,40)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">FUEL</text></g>
+    <g transform="translate(20,40)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">BATT</text></g>
+    <g transform="translate(40,40)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">OIL</text></g>
+
+    <g transform="translate(-20,50)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">MAP+</text></g>
+    <g transform="translate(0,50)">  <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">MAP+</text></g>
+    <g transform="translate(20,50)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">MAP-</text></g>
+    <g transform="translate(40,50)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">DASH</text></g>
+  </g>
+
+  <text x="10" y="255" style="font-family:Arial; font-size:5px; font-weight:bold;">EXTRAS / TRAS</text>
+  <g transform="translate(18, 265)">
+    <g transform="translate(0,0)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">LOOK L</text></g>
+    <g transform="translate(20,0)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">LOOK R</text></g>
+
+    <!-- novos -->
+    <g transform="translate(0,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">CAM</text></g>
+    <g transform="translate(20,10)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">HUD</text></g>
+    <g transform="translate(40,10)"> <use href="#thumb-label" class="color-pit"/> <text y="1" class="thumb-text">PIT LIM</text></g>
+    <g transform="translate(40,00)"> <use href="#thumb-label" class="color-pit"/> <text y="1" class="thumb-text">PIT LIM</text></g>
+    <g transform="translate(60,0)"> <use href="#thumb-label" class="color-radio"/> <text y="1" class="thumb-text">RADIO</text></g>
+    <g transform="translate(60,10)"> <use href="#thumb-label" class="color-radio"/> <text y="1" class="thumb-text">RADIO</text></g>
+    <g transform="translate(80,10)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">ERS</text></g>
+    <g transform="translate(100,10)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">HARV</text></g>
+    <g transform="translate(120,10)"> <use href="#thumb-label" class="color-drs"/> <text y="1" class="thumb-text">DEP</text></g>
+    <g transform="translate(140,10)"> <use href="#thumb-label" class="color-fcy"/> <text y="1" class="thumb-text">BRT</text></g>
+
+    <g transform="translate(80,0)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">TC2</text></g>
+    <g transform="translate(100,0)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">TC3</text></g>
+    <g transform="translate(120,0)"> <use href="#thumb-label" class="color-eng"/> <text y="1" class="thumb-text">TYRE</text></g>
+    <g transform="translate(140,0)"> <use href="#thumb-label" class="color-blk"/> <text y="1" class="thumb-text">RSET</text></g>
+  </g>
+
+  <text x="10" y="295" style="font-family:Arial; font-size:3px; fill:#666;">Dica: Aplique laminação transparente antes de recortar para proteger do suor.</text>
+
+</svg>

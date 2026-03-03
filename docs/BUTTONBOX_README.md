@@ -1,285 +1,230 @@
-# ESP32-S3-Zero SimHub ButtonBox
+# ESP-ButtonBox-WHEEL — Firmware para Volante SimRacing
 
-Firmware completo para ButtonBox de corrida compatível com SimHub usando ESP32-S3-Zero.
+Firmware HID Gamepad completo para Button Box de volante de corrida.
+Aparece no Windows como **"ESP-ButtonBox-WHEEL"** no joy.cpl.
 
-## 📋 Componentes
+## Hardware
 
-### Hardware Utilizado
-- **ESP32-S3-Zero** (4MB Flash, USB-C)
-- **Matriz de Botões 5x5** (25 botões)
-- **4x Encoders Rotativos** (EC11, canais A/B — sem push usado, modo eixo ou botões)
-- **Barra de LEDs WS2812B** (5 LEDs)
-- **LED Onboard RGB** (GP21 - opcional)
+| Item | Especificação |
+|------|--------------|
+| **MCU** | ESP32-S3-WROOM1 N8R8 (16MB Flash, 8MB PSRAM) |
+| **Matriz de Botões** | 8x8 via MCP23017 (I2C) — 27 slots usados + 1 SHIFT |
+| **Encoders** | 9x EC11 (1 MFC + 8 para eixos/botões) |
+| **Sensores Hall** | 2x analógicos (embreagens esquerda/direita) |
+| **5-Way Joystick** | HAT/POV (8 direções) + botão central |
+| **Comunicação** | USB HID Gamepad (nativo) + UART para tela WT32 |
 
-## 🔌 Pinagem ESP32-S3-Zero
+## Identidade USB
 
-### Matriz de Botões (5x5)
-| Componente | Função | GPIO | Direção |
-|------------|--------|------|---------|
-| Coluna 1 | Saída Matriz | GP1 | OUTPUT |
-| Coluna 2 | Saída Matriz | GP2 | OUTPUT |
-| Coluna 3 | Saída Matriz | GP3 | OUTPUT |
-| Coluna 4 | Saída Matriz | GP4 | OUTPUT |
-| Coluna 5 | Saída Matriz | GP5 | OUTPUT |
-| Linha 1 | Entrada Botões | GP6 | INPUT_PULLUP |
-| Linha 2 | Entrada Botões | GP7 | INPUT_PULLUP |
-| Linha 3 | Entrada Botões | GP8 | INPUT_PULLUP |
-| Linha 4 | Entrada Botões | GP9 | INPUT_PULLUP |
-| Linha 5 | Entrada Botões | GP10 | INPUT_PULLUP |
+| Campo | Valor |
+|-------|-------|
+| VID | `0x303A` (Espressif) |
+| PID | `0x8172` |
+| Product Name | ESP-ButtonBox-WHEEL |
+| Manufacturer | SimRacing_DIY |
+| USB Mode | TinyUSB OTG (`USB_MODE=0`) |
 
-**Numeração dos Botões (1-25):**
+## HID Report — 64 Botões + 10 Eixos + 1 HAT
+
+### GamepadReport (19 bytes)
+
+```c
+typedef struct __attribute__((packed)) {
+    uint64_t buttons;   // 64 botões (8 bytes)
+    uint8_t  hat;       // HAT/POV: 4 bits + 4 padding (1 byte)
+    int8_t   x;         // Encoder 2
+    int8_t   y;         // Encoder 3
+    int8_t   z;         // Hall A (Clutch L)
+    int8_t   rz;        // Hall B (Clutch R)
+    int8_t   rx;        // Encoder 4
+    int8_t   ry;        // Encoder 5
+    int8_t   slider;    // Encoder 6
+    int8_t   dial;      // Encoder 7
+    int8_t   vx;        // Encoder 8
+    int8_t   vy;        // Encoder 9
+} GamepadReport;
 ```
-Linha 1: Botões 1-5
-Linha 2: Botões 6-10
-Linha 3: Botões 11-15
-Linha 4: Botões 16-20
-Linha 5: Botões 21-25
-```
 
-### Encoders Rotativos (4x)
-| Encoder | Pino A | Pino B | Função |
-|---------|--------|--------|--------|
-| Encoder 1 | GP11 | GP12 | TC/ABS/Map/etc |
-| Encoder 2 | GP13 | GP14 | Brake Bias |
-| Encoder 3 | GP15 | GP16 | ARB/Diff |
-| Encoder 4 | GP17 | GP18 | Volume/Etc |
+### 10 Eixos HID
 
-**Todas as entradas configuradas com `INPUT_PULLUP`**
+| # | Eixo HID | Variável | Fonte | Função típica |
+|---|----------|----------|-------|---------------|
+| 1 | X | axisX | Encoder 2 | BB (Brake Bias) |
+| 2 | Y | axisY | Encoder 3 | MAP |
+| 3 | Z | axisZ | Hall A | Clutch Esquerda |
+| 4 | Rz | axisRZ | Hall B | Clutch Direita |
+| 5 | Rx | axisRX | Encoder 4 | TC |
+| 6 | Ry | axisRY | Encoder 5 | ABS |
+| 7 | Slider | axisSlider | Encoder 6 | Lateral 1 |
+| 8 | Dial | axisDial | Encoder 7 | Lateral 2 |
+| 9 | Vx | axisVx | Encoder 8 | Lateral 3 |
+| 10 | Vy | axisVy | Encoder 9 | Lateral 4 |
 
-**Modo eixo x modo botões:** segure juntos os botões `11` e `20` por ~1,5s para alternar. 
-- Modo eixos (padrão): encoders mapeados para **eixos de rotação** apenas (Z, Rx, Ry, Rz) — joystick X/Y ficam zerados.
-  - Encoder 1 → Eixo Z
-  - Encoder 2 → Rotação X
-  - Encoder 3 → Rotação Y  
-  - Encoder 4 → Rotação Z
-- Modo botões: cada giro envia cliques nos botões virtuais 26-33 (CW/CCW). 
-- LED 5 indica o modo: ciano = eixos, âmbar = botões.
+> **Nota:** joy.cpl do Windows mostra apenas 8 eixos e 32 botões (limitação visual).
+> Use https://gamepad-tester.com, JoyToKey ou SimHub para ver todos os 64 botões e 10 eixos.
 
-### LEDs
-| Componente | GPIO | Tipo | Função |
-|------------|------|------|--------|
-| Barra LEDs | GP45 | WS2812B | 5 LEDs indicadores |
-| LED Onboard | GP21 | RGB | Status (opcional) |
+### Botões HID
 
-## ⚡ Funcionalidades
+| Range | Fonte | Descrição |
+|-------|-------|-----------|
+| 1–27 | Matriz MCP23017 | Botões físicos (slot 28 = SHIFT interno, não reportado) |
+| 23–26 | 5-Way Joystick | Direções consumidas pelo HAT (não aparecem como botões) |
+| 27 | 5-Way Center | Botão OK/confirm |
+| 40–55 | Encoders 2-9 | Botões virtuais (modo encoder-button): CW/CCW |
+| 60–69 | MFC Menu | Botões virtuais: TC2, TC3, TYRE, VOL_A, VOL_B up/down |
 
-### ✅ Implementado
-- [x] **Matriz de Botões 5x5** com debounce de 50ms
-- [x] **4 Encoders Rotativos** com detecção Gray Code
-- [x] **5 LEDs WS2812B** com indicação visual
-- [x] **Integração SimHub** (protocolo nativo)
-- [x] **Detecção automática** de 25 botões
-- [x] **Feedback Serial** completo para debug
+### HAT/POV Switch
 
-### 🔧 Características Técnicas
-- **Debounce**: 50ms para todos os botões
-- **Scan Rate**: ~1ms por ciclo completo
-- **Encoders**: Detecção por Gray Code (sem perda de pulsos)
-- **LEDs**: Atualização em tempo real baseada em encoders
-- **Serial**: 115200 baud (USB CDC)
+| Valor | Direção |
+|-------|---------|
+| 0 | Null (solto) |
+| 1 | N (Up) |
+| 2 | NE |
+| 3 | E (Right) |
+| 4 | SE |
+| 5 | S (Down) |
+| 6 | SW |
+| 7 | W (Left) |
+| 8 | NW |
 
-## 📦 Compilação e Upload
+## Pinagem ESP32-S3-WROOM1 N8R8
 
-### Compilar Firmware
+### I2C (MCP23017)
+
+| Função | GPIO |
+|--------|------|
+| SDA | 8 |
+| SCL | 9 |
+
+### Sensores Hall (Embreagens)
+
+| Sensor | GPIO | Eixo HID |
+|--------|------|----------|
+| Hall A (Clutch L) | 1 | Z |
+| Hall B (Clutch R) | 2 | Rz |
+
+### Encoders (9x)
+
+| Encoder | Pin A | Pin B | Função |
+|---------|-------|-------|--------|
+| ENC1 (MFC) | 14 | 15 | Menu rotativo |
+| ENC2 | 16 | 17 | Eixo X / BB |
+| ENC3 | 18 | 21 | Eixo Y / MAP |
+| ENC4 | 38 | 39 | Eixo Rx / TC |
+| ENC5 | 40 | 41 | Eixo Ry / ABS |
+| ENC6 | 42 | 47 | Eixo Slider |
+| ENC7 | 48 | 35 | Eixo Dial |
+| ENC8 | 36 | 37 | Eixo Vx |
+| ENC9 | 3 | 46 | Eixo Vy |
+
+### UART (para tela WT32)
+
+| Função | GPIO | Baud |
+|--------|------|------|
+| TX | 43 | 115200 |
+
+> Debug também sai pela UART TX (GPIO 43) via CH340 no Mac.
+
+## Menu MFC (Encoder 1)
+
+O encoder principal (MFC) navega por 15 itens de menu:
+
+| # | Item | O que faz | Tipo |
+|---|------|-----------|------|
+| 0 | CLUTCH | Cicla entre 6 modos de embreagem | Config |
+| 1 | BITE | Ajusta bite point (0-100%) | Config |
+| 2 | CALIB | Inicia/para calibração dos Hall sensors | Config |
+| 3 | ENC MODE | Alterna encoders entre eixos ↔ botões | Config |
+| 4 | BRIGHT | Ajusta brilho (15-255) | UART → tela |
+| 5 | PAGE | Troca página da tela | UART → tela |
+| 6 | VOL_SYS | Volume do sistema (Consumer Control) | Multimídia |
+| 7 | VOL_A | Volume app A | Botão virtual 66-67 |
+| 8 | VOL_B | Volume app B | Botão virtual 68-69 |
+| 9 | TC2 | Traction Control 2 | Botão virtual 60-61 |
+| 10 | TC3 | Traction Control 3 | Botão virtual 62-63 |
+| 11 | TYRE | Tipo de pneu | Botão virtual 64-65 |
+| 12 | ERS | Modo ERS (Balanced/Harvest/Deploy/Hotlap) | Config |
+| 13 | FUEL | Mix de combustível (0-100) | Config |
+| 14 | RESET | Reseta todas as configs para padrão | Config |
+
+**Navegação:** Gire o encoder MFC para selecionar item. Pressione botão 1 (MFC push) para entrar em modo ajuste. Gire para ajustar valor. Pressione novamente para sair.
+
+## 6 Modos de Embreagem
+
+| # | Modo | Comportamento |
+|---|------|---------------|
+| 0 | DUAL | Ambas as paddles independentes (Z e Rz) |
+| 1 | MIRROR | Média das duas paddles |
+| 2 | BITE | F1 Style com bite point configurável |
+| 3 | PROGRESSIVE | Paddle esq limita a dir |
+| 4 | SINGLE_L | Só paddle esquerda (Z) |
+| 5 | SINGLE_R | Só paddle direita (Rz) |
+
+## Compilação e Upload
+
+### Compilar
+
 ```bash
-pio run -e buttonbox-s3-zero
+pio run -e wroom1-n8r8-wheel
 ```
 
-### Upload para ESP32-S3-Zero
+### Upload (via CH340)
+
 ```bash
-pio run -e buttonbox-s3-zero -t upload
+pio run -e wroom1-n8r8-wheel --target upload --upload-port /dev/cu.usbmodem5AF61103441
 ```
 
-### Monitor Serial
+### Monitor Serial (debug via CH340)
+
 ```bash
-pio device monitor -e buttonbox-s3-zero
+pio device monitor -e wroom1-n8r8-wheel -p /dev/cu.usbmodem5AF61103441
 ```
 
-## 🎮 Configuração no SimHub
+## Arquitetura do Build
 
-### 1. Conectar Device
-1. Abra **SimHub**
-2. Vá em **Settings → Arduino**
-3. Clique em **Scan for Arduinos**
-4. Selecione `ESP-SimHub-ButtonBox` na porta detectada
+| Arquivo | Função |
+|---------|--------|
+| `src/main_wheel.cpp` | Firmware principal (1183 linhas) |
+| `platformio.ini` | Env `wroom1-n8r8-wheel` |
+| `variants/wroom1_wheel/pins_arduino.h` | Variante customizada (PID=0x8172) |
+| `scripts/patch_hid_name.py` | Patch pré-build: muda "TinyUSB HID" → "ESP-ButtonBox-WHEEL" no framework |
 
-### 2. Mapear Botões
-1. Vá em **Controls & Events → Custom Serial Devices**
-2. Selecione `ESP-SimHub-ButtonBox`
-3. Configure os **25 botões** para suas funções:
-   - DRS
-   - Pit Limiter
-   - Look Left/Right
-   - TC/ABS Toggle
-   - Ignition
-   - Etc.
+### Por que precisamos de cada arquivo extra
 
-### 3. Mapear Encoders
-Os 4 encoders são detectados como **botões incrementais**:
-- Encoder 1 CW/CCW
-- Encoder 2 CW/CCW
-- Encoder 3 CW/CCW
-- Encoder 4 CW/CCW
+- **Custom variant**: O `pins_arduino.h` padrão do ESP32-S3 define `USB_PID 0x1001` SEM `#ifndef` guard, impedindo override via `-D`. A variante customizada define `USB_PID 0x8172`.
 
-Configure para:
-- TC Level +/-
-- ABS Level +/-
-- Brake Bias +/-
-- Engine Map +/-
+- **Patch script**: O joy.cpl do Windows usa o HID interface string descriptor (não o USB product string). O framework Arduino-ESP32 hardcoda "TinyUSB HID" em `USBHID.cpp`. O script pré-build substitui por "ESP-ButtonBox-WHEEL".
 
-## 🔍 Debug e Testes
+## Uso no Windows
 
-### Monitor Serial
-O firmware envia logs completos via Serial USB:
+1. Conecte o cabo USB **nativo** (não o CH340) ao PC Windows
+2. O dispositivo aparece automaticamente como **"ESP-ButtonBox-WHEEL"** em:
+   - **Gerenciador de Dispositivos** → Dispositivos de Interface Humana
+   - **joy.cpl** → Controladores de Jogo
+3. Todos os 64 botões + 10 eixos + HAT são acessíveis via DirectInput
+4. SimHub detecta automaticamente como gamepad HID
 
-```
-========================================
-ESP32-S3 SimHub ButtonBox Firmware
-Version: j (ButtonBox Edition)
-========================================
-Device: ESP-SimHub-ButtonBox
-Free Heap: 340000
-========================================
+## Limitações do joy.cpl
 
-[ButtonMatrix] Initialized 5x5 matrix (25 buttons)
-[Encoders] Initialized 4 rotary encoders
-[LEDs] Initialized 5 WS2812B LEDs on GP45
-[Startup] LED Test Sequence
+| O que o joy.cpl mostra | O que realmente existe |
+|------------------------|----------------------|
+| 32 botões | 64 botões |
+| 8 eixos (sem Vx/Vy) | 10 eixos |
+| 1 HAT/POV | 1 HAT/POV |
 
-[System] ButtonBox Ready!
-Waiting for SimHub connection...
+Para verificar tudo: https://gamepad-tester.com ou **SimHub → Controles → Input Detection**.
 
-[Button] Pressed: 1
-[Button] Released: 1
-[Encoder 1] CW: 1
-[Encoder 2] CCW: -1
-[SimHub] Hello command received
-```
+## Documentação Relacionada
 
-### Teste de LEDs
-Na inicialização, os 5 LEDs acendem em sequência (verde) para verificar funcionamento.
-
-### Teste de Botões
-Pressione qualquer botão e veja no monitor serial:
-```
-[Button] Pressed: 12
-[Button] Released: 12
-```
-
-### Teste de Encoders
-Gire qualquer encoder e veja:
-```
-[Encoder 1] CW: 1   (sentido horário)
-[Encoder 1] CCW: -1 (sentido anti-horário)
-```
-
-## 💡 Exemplo de LEDs
-
-Os LEDs atualmente mostram o estado dos encoders:
-- **LED 1-4**: Correspondem aos Encoders 1-4
-  - 🟢 **Verde**: Valor positivo (girado CW)
-  - 🔴 **Vermelho**: Valor negativo (girado CCW)
-  - 🔵 **Azul**: Valor zero (posição inicial)
-- **LED 5**: Status do sistema (branco = ativo)
-
-**Você pode customizar** a função dos LEDs editando `updateLEDs()` em `main_buttons.cpp`.
-
-## 🛠️ Esquema de Ligação
-
-### Matriz de Botões
-```
-         COL1  COL2  COL3  COL4  COL5
-         GP1   GP2   GP3   GP4   GP5
-          |     |     |     |     |
-ROW1 GP6--●-----●-----●-----●-----●--
-ROW2 GP7--●-----●-----●-----●-----●--
-ROW3 GP8--●-----●-----●-----●-----●--
-ROW4 GP9--●-----●-----●-----●-----●--
-ROW5 GP10-●-----●-----●-----●-----●--
-
-● = Botão (NO - Normally Open)
-```
-
-### Encoder (EC11)
-```
-   Encoder EC11 (A/B)
-   ┌─────────────┐
-   │   A    B    │
-   │  GP11 GP12  │  (Encoder 1)
-   │             │
-   │   GND  VCC  │
-   └─────────────┘
-```
-
-### LEDs WS2812B
-```
-ESP32-S3-Zero          Barra de LEDs
-    GP45 ──────────────> DIN (LED1)
-    GND  ──────────────> GND
-    5V   ──────────────> VCC
-```
-
-## ⚙️ Customização
-
-### Mudar Número de Botões/Encoders
-Edite `main_buttons.cpp`:
-```cpp
-#define MATRIX_COLS 5  // Alterar conforme sua matriz
-#define MATRIX_ROWS 5
-#define NUM_ENCODERS 4 // Alterar número de encoders
-#define LED_COUNT 5    // Alterar número de LEDs
-```
-
-### Debounce dos Botões
-```cpp
-const unsigned long DEBOUNCE_DELAY = 50;  // 50ms (ajustar se necessário)
-```
-
-### Comportamento dos LEDs
-Customize a função `updateLEDs()` para:
-- Indicar TC/ABS ativo
-- Mostrar marcha atual
-- Indicar bandeiras
-- Nível de combustível
-- Qualquer outro dado do SimHub
-
-## 📊 Especificações Técnicas
-
-| Item | Valor |
-|------|-------|
-| Microcontrolador | ESP32-S3 (Dual Core 240MHz) |
-| Flash | 4MB |
-| RAM | 512KB SRAM |
-| Botões Suportados | 25 (matriz 5x5) |
-| Encoders | 4 rotativos |
-| LEDs | 5 WS2812B + 1 onboard |
-| Comunicação | USB CDC (Serial) |
-| Velocidade Serial | 115200 baud |
-| Scan Rate | ~1000 Hz |
-| Latência | <2ms |
-
-## 🔗 Links Úteis
-
-- [SimHub Download](https://www.simhubdash.com/)
-- [ESP32-S3-Zero Specs](https://wiki.waveshare.com/ESP32-S3-Zero)
-- [NeoPixelBus Library](https://github.com/Makuna/NeoPixelBus)
-- [WS2812B Datasheet](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
-
-## 📝 Notas
-
-- **Encoders**: Use encoders com detents para melhor feedback tátil
-- **Botões**: Switches Cherry MX ou similar recomendados
-- **Alimentação**: ESP32-S3-Zero alimentado via USB-C (5V)
-- **LEDs**: Se usar mais de 10 LEDs, considere fonte externa 5V
-
-## 🚀 Próximas Melhorias
-
-- [ ] Suporte para encoder com botão (push)
-- [ ] Profiles de LED customizáveis via SimHub
-- [ ] Calibração automática de encoders
-- [ ] Modo standalone (sem SimHub)
-- [ ] Suporte para displays OLED (I2C)
+| Doc | Conteúdo |
+|-----|----------|
+| [MANUAL_BUTTONBOX.md](MANUAL_BUTTONBOX.md) | Manual completo com combos e atalhos |
+| [MFC_MENU_IMPLEMENTATION.md](MFC_MENU_IMPLEMENTATION.md) | Implementação detalhada do menu MFC |
+| [PINMAP_SOLDERING_GUIDE.md](PINMAP_SOLDERING_GUIDE.md) | Guia de soldagem passo a passo |
+| [MCP23017_MATRIZ_8x8.md](MCP23017_MATRIZ_8x8.md) | Detalhes da matriz 8x8 via I2C |
+| [COMO_CONFIGURAR_SIMHUB.md](COMO_CONFIGURAR_SIMHUB.md) | Configuração do SimHub (dashboard + wheel) |
+| [BUTTONBOX_README_S3ZERO_LEGACY.md](BUTTONBOX_README_S3ZERO_LEGACY.md) | Legacy: firmware antigo para ESP32-S3-Zero |
 
 ---
 
-**Desenvolvido para SimHub Racing Community** 🏎️
+**Firmware: main_wheel.cpp | Env: wroom1-n8r8-wheel | Device: ESP-ButtonBox-WHEEL**

@@ -65,6 +65,13 @@ Stream* DebugPort = nullptr;
 // ==========================================
 
 HardwareSerial DebugSerial(0);  // UART0 on custom pins
+HardwareSerial ButtonBoxSerial(1);  // UART1 for ButtonBox RX
+
+static const int BUTTONBOX_RX_PIN = 11;
+static const uint32_t BUTTONBOX_BAUD = 115200;
+
+void handleButtonBoxUart();
+void processButtonBoxLine(const String &line);
 
 // Debug logging function - sends to Debug UART
 void debugLog(const String &msg) {
@@ -109,29 +116,29 @@ void setup(void)
 	// Configure GPIO0 with strong pull-up to prevent entering download mode
 	// This is critical for WT32-SC01 Plus when SimHub opens the serial port
 	pinMode(0, INPUT_PULLUP);
-  
+
 	// Small delay to stabilize GPIO0 before USB CDC initialization
 	delay(100);
-  
+
 	// Initialize Serial FIRST with explicit begin()
 	Serial.begin(115200);
 	Serial.setDebugOutput(true);
-  
+
 	// Wait for USB CDC to enumerate - critical for USB CDC mode
 	// This blocks until the host recognizes the device
 	unsigned long start = millis();
 	while (!Serial && (millis() - start) < 5000) {
 		delay(10);
 	}
-  
+
 	// Additional delay to stabilize
 	delay(1000);
-	
+
 	// FLUSH any garbage
 	while (Serial.available()) Serial.read();
 	Serial.flush();
 	delay(200);
-	
+
 	// ==========================================
 	// Initialize UART0 for DEBUG logging via ZXACC (COM12)
 	// This allows monitoring while SimHub uses USB CDC on COM11
@@ -142,7 +149,7 @@ void setup(void)
 	debugLog("DEBUG UART0 Initialized on COM12");
 	debugLog("Monitoring via ZXACC while SimHub uses COM11");
 	debugLog("========================================\n");
-	
+
 	// Print immediate boot message
 	Serial.print("\n\n========================================\n");
 	Serial.print(">>> ESP32-S3 BOOT SEQUENCE START\n");
@@ -151,13 +158,13 @@ void setup(void)
 	Serial.print(">>> Setup() starting...\n");
 	Serial.flush();
 	delay(100);
-  
+
 	bootCount++;
 	Serial.print(">>> bootCount = ");
 	Serial.println(bootCount);
 	Serial.flush();
 	delay(100);
-	
+
 	screenLog("BOOT: start #" + String(bootCount));
 	screenLog(String("Reset:") + resetReasonStr(esp_reset_reason()));
 	screenLog("Heap=" + String(ESP.getFreeHeap()) + " PSRAM=" + String(ESP.getFreePsram()));
@@ -167,38 +174,42 @@ void setup(void)
 	debugLog(">>> About to call shCustomProtocol.setup()");
 	Serial.flush();
 	delay(100);
-	
+
 	shCustomProtocol.setup();
-	
+
 	Serial.println(">>> shCustomProtocol.setup() completed");
 	debugLog(">>> shCustomProtocol.setup() completed");
 	Serial.flush();
 	delay(100);
-	
+
 	arqserial.setIdleFunction(idle);
 	screenLog("Display init OK");
 	debugLog("Display init OK");
-	
+
+	// UART RX do ButtonBox (GPIO11)
+	ButtonBoxSerial.begin(BUTTONBOX_BAUD, SERIAL_8N1, BUTTONBOX_RX_PIN, -1);
+	debugLog("UART1 ButtonBox RX init (GPIO11)");
+
 	// Initialize NeoPixel LED strip
 	#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
 	Serial.println(">>> [STEP 1] About to init NeoPixel LEDs...");
 	Serial.flush();
 	debugLog(">>> [STEP 1] About to init NeoPixel LEDs...");
 	delay(100);
-	
+
 	Serial.println(">>> [STEP 2] Calling neoPixelBusBegin()...");
 	Serial.flush();
 	debugLog(">>> [STEP 2] Calling neoPixelBusBegin()...");
 	delay(100);
-	
+
 	neoPixelBusBegin();
-	
+
 	Serial.println(">>> [STEP 3] neoPixelBusBegin() returned successfully");
 	Serial.flush();
 	debugLog(">>> [STEP 3] neoPixelBusBegin() returned successfully");
 	screenLog("LEDs init OK");
 	#endif
-	
+
 	Serial.println(">>> Setup complete!");
 	debugLog(">>> Setup complete!");
 	Serial.println("========================================\n");
@@ -224,41 +235,28 @@ void loop()
 
 	if (FlowSerialAvailable() > 0) {
 		int r = FlowSerialTimedRead();
-		Serial.print("[main.loop] Received byte: 0x");
-		Serial.println(r, HEX);
-		debugLog(String("[main.loop] Received byte: 0x") + String(r, HEX));
-		Serial.flush();
-		
+
 		if (r == MESSAGE_HEADER)
 		{
-			Serial.println("[main.loop] MESSAGE_HEADER detected!");
-			debugLog("[main.loop] MESSAGE_HEADER detected!");
-			Serial.flush();
 			lastSerialActivity = millis();
 			loop_opt = FlowSerialTimedRead();
-			Serial.print("[main.loop] Command byte: ");
-			Serial.println((char)loop_opt);
-			debugLog(String("[main.loop] Command byte: ") + (char)loop_opt);
-			Serial.flush();
-			
+
 			// PROTECTION: If command byte is 0x01, this is actually an ARQ packet being re-read
 			// Skip processing to avoid infinite loops
 			if (loop_opt == 0x01) {
-				Serial.println("[main.loop] WARNING: Detected ARQ packet (0x01), skipping");
-				debugLog("[main.loop] WARNING: Detected ARQ packet (0x01), skipping");
 				yield();
 				return;
 			}
-			
+
 			yield(); // Feed watchdog
-			
+
 			switch(loop_opt) {
 				case '1':
 					Command_Hello();
 					yield();
 					break;
-				case '0': 
-					Command_Features(); 
+				case '0':
+					Command_Features();
 					break;
 				case '4': Command_RGBLEDSCount(); break;
 				case '6': Command_RGBLEDSData(); break;
@@ -277,19 +275,118 @@ void loop()
 			case 'B': Command_SimpleModulesCount(); break;
 			case 'A': Command_Acq(); break;
 			case 'G': Command_GearData(); break;
-			case 'P': 
-				debugLog("[main.loop] Processing telemetry data (P command)");
-				Command_CustomProtocolData(); 
-				debugLog("[main.loop] Telemetry processed");
+			case 'P':
+				Command_CustomProtocolData();
 				break;
 			default:
 				break;
 			}
 		}
 	}
+
+	// Processa mensagens do ButtonBox via UART
+	handleButtonBoxUart();
 }
 
 void idle(bool critical) {
 	yield(); // Feed watchdog
 	shCustomProtocol.idle();  // Re-enabled: idle updates
+}
+
+// ================================
+// UART ButtonBox -> WT32 Popups
+// ================================
+String buttonBoxLine;
+
+void handleButtonBoxUart() {
+	while (ButtonBoxSerial.available()) {
+		char c = (char)ButtonBoxSerial.read();
+		if (c == '\r') {
+			continue;
+		}
+		if (c == '\n') {
+			if (buttonBoxLine.length() > 0) {
+				processButtonBoxLine(buttonBoxLine);
+			}
+			buttonBoxLine = "";
+			continue;
+		}
+		if (buttonBoxLine.length() < 80) {
+			buttonBoxLine += c;
+		}
+	}
+}
+
+void processButtonBoxLine(const String &line) {
+	if (!line.startsWith("$")) {
+		return;
+	}
+	int p1 = line.indexOf(':', 1);
+	int p2 = (p1 >= 0) ? line.indexOf(':', p1 + 1) : -1;
+	if (p1 < 0 || p2 < 0) {
+		return;
+	}
+	String cat = line.substring(1, p1);
+	String func = line.substring(p1 + 1, p2);
+	String val = line.substring(p2 + 1);
+	cat.trim();
+	func.trim();
+	val.trim();
+
+	String msg;
+	if (cat == "MODE" && func == "ENC") {
+		msg = String("ENC: ") + val;
+	} else if (cat == "MFC" && func == "NAV") {
+		msg = String("MFC: ") + val;
+	} else if (cat == "MFC" && func == "ADJUST") {
+		msg = String("ADJUST: ") + val;
+	} else if (cat == "MFC" && func == "CONFIRM") {
+		// Legacy compatibility
+		if (val == "PAGE_NEXT") {
+			shCustomProtocol.pageNextExternal();
+			msg = "PAGE +";
+		} else if (val == "PAGE_PREV") {
+			shCustomProtocol.pagePrevExternal();
+			msg = "PAGE -";
+		} else {
+			msg = String("MFC OK: ") + val;
+		}
+	} else if (cat == "BRIGHT" && func == "VAL") {
+		int brightVal = val.toInt();
+		if (brightVal >= 15 && brightVal <= 255) {
+			shCustomProtocol.setBacklight(brightVal);
+			shCustomProtocol.adjustLedLuminance(0);
+			msg = String("BRIGHT ") + shCustomProtocol.getBacklightPercent() + "%";
+		} else {
+			msg = "BRIGHT: invalid";
+		}
+	} else if (cat == "PAGE" && func == "NEXT") {
+		shCustomProtocol.pageNextExternal();
+		msg = "";
+	} else if (cat == "PAGE" && func == "PREV") {
+		shCustomProtocol.pagePrevExternal();
+		msg = "";
+	} else if (cat == "BITE" && func == "VAL") {
+		msg = String("BITE: ") + val + "%";
+	} else if (cat == "CLUTCH" && func == "MODE") {
+		msg = String("CLUTCH: ") + val;
+	} else if (cat == "CALIB" && func == "START") {
+		msg = String("CALIB: ") + val;
+	} else if (cat == "CALIB" && func == "DONE") {
+		msg = String("CALIB OK: ") + val;
+	} else if (cat == "CALIB" && func == "INVALID") {
+		msg = String("CALIB ERR: ") + val;
+	} else if (cat == "SYS" && func == "BOOT") {
+		msg = String("BOOT: ") + val;
+	} else if (cat == "SYS" && func == "RESET") {
+		msg = String("RESET: ") + val;
+	} else if (cat == "MEDIA") {
+		msg = String("MEDIA: ") + func;
+	} else {
+		msg = cat + ":" + func + ":" + val;
+	}
+
+	if (msg.length() > 0) {
+		shCustomProtocol.showPopup(msg, 2000);
+	}
 }

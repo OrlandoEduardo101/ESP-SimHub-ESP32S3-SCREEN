@@ -1,6 +1,44 @@
-# Como Configurar o SimHub para o Dashboard
+# Como Configurar o SimHub
 
-Este guia explica como configurar o SimHub para enviar dados para o dashboard no WT32-SC01 Plus.
+Este guia explica como configurar o SimHub para dois componentes:
+1. **ESP-ButtonBox-WHEEL** — Button box USB HID (botões, encoders, embreagens)
+2. **WT32-SC01 Plus Dashboard** — Tela com dados de telemetria via protocolo serial
+
+---
+
+## Parte 1: Button Box (ESP-ButtonBox-WHEEL)
+
+O volante aparece como **gamepad HID nativo** no Windows. **Não precisa** de "Scan for Arduinos" — o SimHub detecta automaticamente.
+
+### 1.1 Verificar Detecção
+
+1. Conecte o cabo USB **nativo** (não o CH340) ao PC
+2. Abra **joy.cpl** (`Win+R` → `joy.cpl`) — deve aparecer **"ESP-ButtonBox-WHEEL"**
+3. No SimHub, vá em **Controles e Eventos** → selecione "ESP-ButtonBox-WHEEL"
+
+### 1.2 Mapear Botões e Eixos
+
+O dispositivo expõe via USB HID:
+- **64 botões** (joy.cpl mostra 32, mas todos 64 funcionam)
+- **10 eixos** (X, Y, Z, Rz, Rx, Ry, Slider, Dial, Vx, Vy)
+- **1 HAT/POV** (8 direções)
+
+No SimHub ou no jogo, use **Input Detection** para detectar cada botão/encoder ao pressionar.
+
+### 1.3 Eixos Especiais
+
+| Eixo | Função | Nota |
+|------|--------|------|
+| Z / Rz | Embreagens (Hall sensors) | Configuráveis via MFC menu (6 modos) |
+| X, Y, Rx, Ry, Slider, Dial, Vx, Vy | Encoders 2-9 | Modo eixo (default) ou modo botão |
+
+### 1.4 Botões Virtuais do MFC
+
+Quando o menu MFC está em itens como TC2, TC3, TYRE, VOL_A, VOL_B, girar o encoder gera **botões virtuais 60-69** que podem ser mapeados no SimHub/jogo.
+
+---
+
+## Parte 2: Dashboard WT32-SC01 Plus (Protocolo Serial)
 
 ## 1. Configurar o Protocolo Customizado no SimHub
 
@@ -92,7 +130,8 @@ Você pode personalizar o dashboard editando `src/SHCustomProtocol.h`:
 ### O SimHub não envia dados
 - Verifique se o protocolo customizado está configurado corretamente
 - Verifique se o dispositivo foi escaneado com sucesso
-- Verifique se a velocidade serial está em 19200 baud
+- Verifique se a velocidade serial está correta (19200 baud para WT32 dashboard)
+- **Nota:** O button box (ESP-ButtonBox-WHEEL) usa USB HID, NÃO serial — não precisa de scan
 
 ### Os dados não aparecem corretamente
 - Verifique se o protocolo customizado está exatamente como no arquivo `customProtocol-dashBoard.txt`
