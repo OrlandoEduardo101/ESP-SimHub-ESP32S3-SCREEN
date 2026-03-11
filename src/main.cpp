@@ -57,26 +57,23 @@ RTC_DATA_ATTR uint32_t bootCount = 0;
 Stream* DebugPort = nullptr;
 
 // ==========================================
-// DEBUG LOGGING
-// Using UART0 alternative pins (TXD0/RXD0) for debug output
-// This allows monitoring via ZXACC on COM12 while SimHub uses USB CDC on COM11
-// TXD0 = GPIO 43 (Debug Interface Pin 3)
-// RXD0 = GPIO 44 (Debug Interface Pin 4)
+// UART0 — Bidirectional link to ButtonBox wheel
+// Connected via WT32 Debug Header:
+//   TXD0 = GPIO 43 (pin 3) → Wheel RX (GPIO 11)
+//   RXD0 = GPIO 44 (pin 4) ← Wheel TX (GPIO 43)
+// Debug logs go to Serial (USB CDC) only.
 // ==========================================
 
-HardwareSerial DebugSerial(0);  // UART0 on custom pins
-HardwareSerial ButtonBoxSerial(1);  // UART1 for ButtonBox RX
-
-static const int BUTTONBOX_RX_PIN = 11;
-static const uint32_t BUTTONBOX_BAUD = 115200;
+HardwareSerial WheelSerial(0);  // UART0 on debug header pins 43/44
 
 void handleButtonBoxUart();
 void processButtonBoxLine(const String &line);
 
-// Debug logging function - sends to Debug UART
+// Debug logging function - sends to USB CDC Serial only
+// (WheelSerial carries wheel protocol data, not debug)
 void debugLog(const String &msg) {
-	DebugSerial.println(msg);
-	DebugSerial.flush();
+	Serial.println(msg);
+	Serial.flush();
 }
 
 void idle(bool critical);
@@ -140,14 +137,13 @@ void setup(void)
 	delay(200);
 
 	// ==========================================
-	// Initialize UART0 for DEBUG logging via ZXACC (COM12)
-	// This allows monitoring while SimHub uses USB CDC on COM11
-	// Using pins 43 (TXD0) and 44 (RXD0)
+	// Initialize UART0 for wheel communication via debug header
+	// TX=GPIO43 (pin 3 debug) → Wheel RX
+	// RX=GPIO44 (pin 4 debug) ← Wheel TX
 	// ==========================================
-	DebugSerial.begin(115200, SERIAL_8N1, 44, 43);  // RX=44, TX=43
+	WheelSerial.begin(115200, SERIAL_8N1, 44, 43);  // RX=44, TX=43
 	debugLog("\n========================================");
-	debugLog("DEBUG UART0 Initialized on COM12");
-	debugLog("Monitoring via ZXACC while SimHub uses COM11");
+	debugLog("UART0 WheelSerial init TX=43 RX=44 (debug header, wheel RX=11)");
 	debugLog("========================================\n");
 
 	// Print immediate boot message
@@ -185,10 +181,6 @@ void setup(void)
 	arqserial.setIdleFunction(idle);
 	screenLog("Display init OK");
 	debugLog("Display init OK");
-
-	// UART RX do ButtonBox (GPIO11)
-	ButtonBoxSerial.begin(BUTTONBOX_BAUD, SERIAL_8N1, BUTTONBOX_RX_PIN, -1);
-	debugLog("UART1 ButtonBox RX init (GPIO11)");
 
 	// Initialize NeoPixel LED strip
 	#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
@@ -299,8 +291,8 @@ void idle(bool critical) {
 String buttonBoxLine;
 
 void handleButtonBoxUart() {
-	while (ButtonBoxSerial.available()) {
-		char c = (char)ButtonBoxSerial.read();
+	while (WheelSerial.available()) {
+		char c = (char)WheelSerial.read();
 		if (c == '\r') {
 			continue;
 		}
@@ -332,6 +324,15 @@ void processButtonBoxLine(const String &line) {
 	cat.trim();
 	func.trim();
 	val.trim();
+
+	// UART handshake: Wheel -> WT32 ping, WT32 -> Wheel pong
+	// Expected incoming: $BB:PING:<seq>
+	if (cat == "BB" && func == "PING") {
+		String pong = String("$WT:PONG:") + val + "\n";
+		WheelSerial.print(pong);  // UART0 TX=GPIO43 (debug header pin 3)
+		debugLog(String("[UART] RX ping seq=") + val + " -> TX pong via GPIO43");
+		return;
+	}
 
 	String msg;
 	if (cat == "MODE" && func == "ENC") {

@@ -35,7 +35,7 @@ Pin 4 (RXD)    ────────→ Pin 4 (TXD)
 Pin 7 (GND)    ────────→ Pin 7 (GND)
 ```
 
-⚠️ **IMPORTANTE:** 
+⚠️ **IMPORTANTE:**
 - TXD (transmissão) do ESP vai para RXD (recebimento) do ZXACC
 - RXD (recebimento) do ESP vai para TXD (transmissão) do ZXACC
 
@@ -136,3 +136,58 @@ Agora você pode:
 3. ✅ Ver os logs de debug em tempo real na outra janela
 4. ✅ Testar com replay do SimHub
 5. ✅ Verificar se os alertas (flags) estão sendo detectados corretamente
+
+---
+
+## Filtros rápidos (macOS) para testes específicos
+
+Use estes comandos quando quiser monitorar só uma parte do firmware sem poluir o terminal.
+
+### 1) Monitor completo (sem filtro)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101
+```
+
+### 2) Apenas Hall RAW (sensores de embreagem)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered "\\[HALL RAW\\]"
+```
+
+### 3) Apenas UART (PING/PONG + tráfego WT32)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered "\\[UART\\]"
+```
+
+### 4) Apenas eventos do MFC/SHIFT
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered -E "\\[MFC|\\[SHIFT"
+```
+
+### 5) Apenas encoders (direção CW/CCW)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered -E "\\[ENC[0-9]|\\[MFC ENC1"
+```
+
+### 6) Hall + UART juntos (diagnóstico de calibração + retorno WT32)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered -E "\\[HALL RAW\\]|\\[UART\\]"
+```
+
+### 7) Erros e warnings somente
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered -E "\\[ERROR\\]|\\[WARN\\]"
+```
+
+### 8) Salvar log filtrado em arquivo (ex.: Hall)
+```bash
+pio device monitor -b 115200 --port /dev/cu.usbmodem101 | grep --line-buffered "\\[HALL RAW\\]" | tee hall_raw.log
+```
+
+### 9) Descobrir porta atual (quando muda de 101 para 102, etc.)
+```bash
+ls /dev/cu.usbmodem*
+```
+
+### 10) Se quiser parar o monitor
+- Pressione `Ctrl + C`.
+

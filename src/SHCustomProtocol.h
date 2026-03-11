@@ -121,7 +121,8 @@ private:
 	// Global variables
 	int rpmPercent = 50;
 	int prev_rpmPercent = 50;
-	int rpmRedLineSetting = 90;
+	int rpmRedLineSetting = 95;
+	int currentRpms = 0;            // [4] RPM Atual (valor exato)
 	String gear = "N";
 	String prev_gear;
 	String speed = "0";
@@ -638,6 +639,7 @@ public:
 		rpmPercent = FlowSerialReadStringUntil(';').toInt();
 		rpmRedLineSetting = FlowSerialReadStringUntil(';').toInt();
 		String rpmsStr = FlowSerialReadStringUntil(';');
+		currentRpms = rpmsStr.toInt();  // [4] Armazena RPM atual
 
 		// BLOCO 2: Cronometragem (índices 5-10)
 		currentLapTime = FlowSerialReadStringUntil(';');
@@ -677,13 +679,6 @@ public:
 		brakeBias = FlowSerialReadStringUntil(';');    // [30] BrakeBias (e.g., 68.0)
 		brake = FlowSerialReadStringUntil(';');        // [31] Brake pedal (0-100)
 
-		// Validate brakeBias (should be between 0-100)
-		brakeBias.trim();
-		float brakeBiasVal = brakeBias.toFloat();
-		if (brakeBiasVal < 0 || brakeBiasVal > 100 || brakeBias.length() == 0) {
-			brakeBias = "60.0";  // Default to 60.0 if invalid
-		}
-
 		// BLOCO 5: Estratégia (índices 32-41)
 		position = FlowSerialReadStringUntil(';');
 		opponentsCount = FlowSerialReadStringUntil(';');
@@ -697,31 +692,11 @@ public:
 		currentPenalties = FlowSerialReadStringUntil(';');
 		cutTrackWarnings = FlowSerialReadStringUntil(';');
 
-		// Debug: Log flag value (raw)
-		debugLog(String("[RAW] idx39 flag: '") + currentFlag + "'");
-		debugLog(String("[SHCustomProtocol] Flag value received [39]: '") + currentFlag +
-				 String("' (len=") + currentFlag.length() + ")");
-
 		// BLOCO 6: Mensagens e Alertas (índices 42-43)
 		alertMessage = FlowSerialReadStringUntil(';');
 		popupMessage = FlowSerialReadStringUntil(';');
 		alertMessage.trim();
 		popupMessage.trim();
-
-		// Debug: window around flag/alert (indices 38-43)
-		debugLog(String("[CHECK idx38-43] time=") + sessionTimeLeft +
-		         " | flag=" + currentFlag +
-		         " | pen=" + currentPenalties +
-		         " | cut=" + cutTrackWarnings +
-		         " | alert=" + alertMessage +
-		         " | popup=" + popupMessage);
-
-		// Debug: Log alert and popup raw values
-		debugLog(String("[RAW] idx42 alert: '") + alertMessage + "'");
-		debugLog(String("[SHCustomProtocol] Alert [42]: '") + alertMessage +
-				 String("' (len=") + alertMessage.length() + ")");
-		debugLog(String("[SHCustomProtocol] Popup [43]: '") + popupMessage +
-				 String("' (len=") + popupMessage.length() + ")");
 
 		// BLOCO 7: Dados para Arduino LEDs (índices 44-47)
 		rpmPercent2 = FlowSerialReadStringUntil(';');
@@ -745,115 +720,12 @@ public:
 		kersLevel = FlowSerialReadStringUntil(';');
 		turboBoost = FlowSerialReadStringUntil(';');  // Último campo (índice 61)
 
-		// Build raw packet log (indices 0-61)
-		String rawPacket; rawPacket.reserve(512);
-		auto appendField = [&](const String &field) { rawPacket += field; rawPacket += ';'; };
-		appendField(speed);
-		appendField(gear);
-		appendField(String(rpmPercent));
-		appendField(String(rpmRedLineSetting));
-		appendField(rpmsStr);
-		appendField(currentLapTime);
-		appendField(lastLapTime);
-		appendField(bestLapTime);
-		appendField(sessionBestLiveDeltaSeconds);
-		appendField(sessionBestLiveDeltaProgressSeconds);
-		appendField(lapInvalidatedStr);
-		appendField(tyrePressureFrontLeft);
-		appendField(tyrePressureFrontRight);
-		appendField(tyrePressureRearLeft);
-		appendField(tyrePressureRearRight);
-		appendField(tyreTemperatureFrontLeft);
-		appendField(tyreTemperatureFrontRight);
-		appendField(tyreTemperatureRearLeft);
-		appendField(tyreTemperatureRearRight);
-		appendField(brakeTemperatureFrontLeft);
-		appendField(brakeTemperatureFrontRight);
-		appendField(brakeTemperatureRearLeft);
-		appendField(brakeTemperatureRearRight);
-		appendField(oilTemperature);
-		appendField(waterTemperature);
-		appendField(tcLevel);
-		appendField(tcActive);
-		appendField(absLevel);
-		appendField(absActive);
-		appendField(isTCCutNull);
-		appendField(brakeBias);
-		appendField(brake);
-		appendField(position);
-		appendField(opponentsCount);
-		appendField(driverAheadGap);
-		appendField(driverBehindGap);
-		appendField(fuelRemainingLaps);
-		appendField(fuelLitersPerLap);
-		appendField(sessionTimeLeft);
-		appendField(currentFlag);
-		appendField(currentPenalties);
-		appendField(cutTrackWarnings);
-		appendField(alertMessage);
-		appendField(popupMessage);
-		appendField(rpmPercent2);
-		appendField(spotterLeft);
-		appendField(spotterRight);
-		appendField(absActive2);
-		appendField(tyreWearFrontLeft);
-		appendField(tyreWearFrontRight);
-		appendField(tyreWearRearLeft);
-		appendField(tyreWearRearRight);
-		appendField(sector1Time);
-		appendField(sector2Time);
-		appendField(sector3Time);
-		appendField(airTemperature);
-		appendField(roadTemperature);
-		appendField(shiftLightTrigger);
-		appendField(drsAvailable);
-		appendField(drsActive);
-		appendField(kersLevel);
-		appendField(turboBoost);
-		if (rawPacket.length() > 0) rawPacket.remove(rawPacket.length() - 1); // remove last ';'
-		debugLog(String("[RAW] packet: ") + rawPacket);
-
-
-		// Re-parse critical indices from rawPacket to avoid any misalignment
-		String fields[62];
-		int fieldIdx = 0;
-		int last = 0;
-		for (int i = 0; i <= rawPacket.length(); i++) {
-			if (i == rawPacket.length() || rawPacket.charAt(i) == ';') {
-				if (fieldIdx < 62) {
-					fields[fieldIdx] = rawPacket.substring(last, i);
-				}
-				fieldIdx++;
-				last = i + 1;
-			}
+		// Validate brakeBias (should be between 0-100)
+		brakeBias.trim();
+		float brakeBiasVal2 = brakeBias.toFloat();
+		if (brakeBiasVal2 < 0 || brakeBiasVal2 > 100 || brakeBias.length() == 0) {
+			brakeBias = "60.0";  // Default to 60.0 if invalid
 		}
-		// Only override if we got at least up to index 43
-		if (fieldIdx > 43) {
-			String sTime = fields[38];
-			String sFlag = fields[39];
-			String sPen = fields[40];
-			String sCut = fields[41];
-			String sAlert = fields[42];
-			String sPopup = fields[43];
-			sTime.trim(); sFlag.trim(); sPen.trim(); sCut.trim(); sAlert.trim(); sPopup.trim();
-			sessionTimeLeft = sTime;
-			currentFlag = sFlag;
-			currentPenalties = sPen;
-			cutTrackWarnings = sCut;
-			alertMessage = sAlert;
-			popupMessage = sPopup;
-			debugLog(String("[REPARSE idx38-43] time=") + sessionTimeLeft +
-			         " | flag=" + currentFlag +
-			         " | pen=" + currentPenalties +
-			         " | cut=" + cutTrackWarnings +
-			         " | alert=" + alertMessage +
-			         " | popup=" + popupMessage);
-		}
-
-		// Debug: Log complete packet received
-		debugLog(String("[SHCustomProtocol] Telemetry packet complete - Speed: ") + speed +
-				 String(" | Alert: ") + (alertMessage != "NORMAL" ? alertMessage : "none") +
-				 String(" | Flag: ") + currentFlag);
 	}
 
 	// Called once per arduino loop, timing can't be predicted,
@@ -1931,23 +1803,23 @@ public:
 			alertStartTime = millis();
 			alertText = cleanAlertText(popupNormalized);
 
-			// Check for flag messages in popup
-			if (alertUpper.indexOf("ENGINE OFF") >= 0) {
+			// Color for popup based on popup content (not alert!)
+			if (popupUpper.indexOf("ENGINE OFF") >= 0) {
 				bgColor = RGB565(20, 20, 20);
 				textColor = RED;
-			} else if (alertUpper.indexOf("PIT LIMITER") >= 0) {
+			} else if (popupUpper.indexOf("PIT LIMITER") >= 0) {
 				bgColor = ORANGE;
 				textColor = BLACK;
-			} else if (alertUpper.indexOf("YELLOW FLAG") >= 0) {
+			} else if (popupUpper.indexOf("YELLOW FLAG") >= 0) {
 				bgColor = YELLOW;
 				textColor = BLACK;
-			} else if (alertUpper.indexOf("BLUE FLAG") >= 0) {
+			} else if (popupUpper.indexOf("BLUE FLAG") >= 0) {
 				bgColor = BLUE;
 				textColor = WHITE;
-			} else if (alertUpper.indexOf("GREEN FLAG") >= 0 || alertUpper.indexOf("GREEN") >= 0) {
+			} else if (popupUpper.indexOf("GREEN FLAG") >= 0 || popupUpper.indexOf("GREEN") >= 0) {
 				bgColor = GREEN;  // Pure green RGB565
 				textColor = BLACK;
-			} else if (alertUpper.indexOf("LOW FUEL") >= 0) {
+			} else if (popupUpper.indexOf("LOW FUEL") >= 0) {
 				bgColor = RED;
 				textColor = YELLOW;
 			} else {

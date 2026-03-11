@@ -76,7 +76,8 @@
                          │  GPIO 1 ────► Hall A (Clutch L) │
                          │  GPIO 2 ────► Hall B (Clutch R) │
                          │                                │
-                         │  GPIO 43 (TX) ──► WT32 GPIO11  │
+                         │  GPIO 43 (TX) ──► WT32 RXD0/GPIO44  │
+                         │  GPIO 11 (RX) ◄── WT32 TXD0/GPIO43  │
                          └──────────────────────────────────┘
 ```
 
@@ -527,28 +528,36 @@ Após soldar, use o menu MFC:
 
 ## 10) UART → WT32 (Tela)
 
-Comunicação **unidirecional** do ESP32 para o WT32 (dashboard/display).
+Comunicação UART entre ESP32 e WT32.
+
+- **Modo normal (só dashboard):** unidirecional (TX do wheel → RX do WT32)
+- **Modo teste/diagnóstico (PING/PONG):** bidirecional (TX/RX nos dois lados)
 
 ### Conexões
 
-| ESP32-S3 | WT32-SC01 Plus | Função |
+| ESP32-S3 (Wheel) | WT32-SC01 Plus (Debug Header) | Função |
 |:---:|:---:|:---:|
-| GPIO 43 (TX) | GPIO 11 (RX) | Dados (115200 baud) |
-| GND | GND | Terra comum |
+| GPIO 43 (TX) | RXD0 / GPIO 44 (pin 4) | Dados wheel→WT32 (115200 baud) |
+| GPIO 11 (RX) | TXD0 / GPIO 43 (pin 3) | Retorno PONG WT32→wheel |
+| GND | GND (pin 7) | Terra comum |
 
-> **Atenção:** TX → RX (cruzado!). O TX do ESP32 conecta no RX do WT32.
+> **Atenção:** TX → RX (cruzado!). O TX do wheel (GPIO 43) conecta no RXD0 do WT32 (GPIO 44).
+> Os dois fios ficam no **debug header** (conector de 7 pinos) do WT32.
+> **GPIO 10 (EXT_IO1) fica livre para os LEDs endereçáveis (NeoPixel).**
 
 ```
-ESP32-S3                    WT32-SC01 Plus
-┌──────────┐                ┌──────────┐
-│ GPIO 43  │───────────────►│ GPIO 11  │
-│  (TX)    │                │  (RX)    │
-│          │                │          │
-│   GND    │────────────────│   GND    │
-└──────────┘                └──────────┘
+ESP32-S3 (Wheel)            WT32-SC01 Plus (Debug Header)
+┌──────────┐                ┌─────────────────────┐
+│ GPIO 43  │───────────────►│ RXD0 / GPIO 44 (p4) │
+│  (TX)    │                │  (UART0 RX)         │
+│ GPIO 11  │◄───────────────│ TXD0 / GPIO 43 (p3) │
+│  (RX)    │                │  (UART0 TX)         │
+│          │                │                     │
+│   GND    │────────────────│   GND (p7)          │
+└──────────┘                └─────────────────────┘
 ```
 
-> Não é necessário conectar RX do ESP32 ao TX do WT32 (comunicação unidirecional).
+> O debug header do WT32-SC01 Plus tem 7 pinos: +5V, +3.3V, TXD0, RXD0, EN, BOOT, GND.
 
 ---
 
@@ -644,8 +653,9 @@ No Windows → "Dispositivos de Jogo" (joy.cpl), aparece como **"ESP-ButtonBox-W
 - [ ] Verificar HAT/POV: círculo central no Game Controllers deve virar para N/S/E/W
 
 ### Fase 8: UART → WT32
-- [ ] ESP32 GPIO 43 → WT32 GPIO 11 (TX→RX cruzado)
-- [ ] GND comum
+- [ ] ESP32 GPIO 43 (TX) → WT32 RXD0 / GPIO 44 (pin 4 debug header) — cruzado
+- [ ] ESP32 GPIO 11 (RX) ← WT32 TXD0 / GPIO 43 (pin 3 debug header) — retorno PONG
+- [ ] GND comum (pin 7 debug header)
 - [ ] Dashboard do WT32 deve mostrar dados após boot
 
 ### Fase 9: Teste Final Integrado
@@ -783,7 +793,8 @@ GPIOs **seguros** que não estão em uso e não têm conflitos:
 | Hall não responde | VCC=5V (queimou) ou fio solto | Medir com multímetro; alimentar com 3.3V |
 | HAT não funciona | 5-way nas posições erradas | Verificar UP=slot25, DOWN=26, LEFT=27, RIGHT=28 |
 | SHIFT ativa como botão | Slot errado na matriz | SHIFT deve estar no slot 30 (ROW3/COL5) |
-| WT32 não mostra dados | TX/RX não cruzado | GPIO43(TX) → GPIO11(RX) do WT32 |
+| WT32 não mostra dados | TX/RX não cruzado | GPIO43(TX) → WT32 RXD0/GPIO44 (pin 4 debug) + GND |
+| PING timeout no wheel | Retorno UART sem fio ou invertido | WT32 TXD0/GPIO43 (pin 3 debug) → ESP32 GPIO11 (RX) |
 | Volume/Mute não funciona | VOL_SYS não está em modo ajuste | Navegar até VOL_SYS no MFC e pressionar para entrar |
 
 ---
@@ -815,16 +826,18 @@ GPIOs **seguros** que não estão em uso e não têm conflitos:
 | 40 | ENC5_A | Encoder ABS pino A |
 | 41 | ENC5_B | Encoder ABS pino B |
 | 42 | ENC6_A | Encoder Lateral 1 pino A |
-| 43 | UART TX | WT32 GPIO 11 (RX) |
+| 11 | UART RX | WT32 TXD0 / GPIO 43 (pin 3 debug header) |
+| 43 | UART TX | WT32 RXD0 / GPIO 44 (pin 4 debug header) |
+| 44 | Livre (evitar RX UART por conflito com CH340) | — |
 | 46 ⚠️ | ENC9_B | Encoder 9 pino B |
 | 47 | ENC6_B | Encoder Lateral 1 pino B |
 | 48 | ENC7_A | Encoder Lateral 2 pino A |
 
-**Total:** 23 GPIOs em uso + USB nativo
+**Total:** 24 GPIOs em uso + USB nativo
 
 ### GPIOs NÃO Utilizados (disponíveis)
 
-4, 5, 6, 7, 10, 11, 12, 13, 19, 20, 44, 45
+4, 5, 6, 7, 10, 11, 12, 13, 19, 20, 45
 
 ---
 

@@ -30,7 +30,7 @@ extern void debugLog(const String &msg);
 //  remember, if you don't have an external power supply, your board or USB may not be able
 //  to provide enough power.
 // luminance goes from 0-255, UPDATE AT YOUR OWN RISK
-#define LUMINANCE_LIMIT 50  // Adjust brightness 10-60 as needed
+#define LUMINANCE_LIMIT 100  // Adjust brightness 10-60 as needed
 
 
 // The color order that your LED strip uses
@@ -509,6 +509,18 @@ void updateLoadingAnimation() {
     }
 }
 
+// Helper: determine LED color based on alert message
+inline RgbColor getAlertLedColor(const String &alertMsg) {
+    if (alertMsg.indexOf("BLUE") >= 0) return COLOR_FLAG_BLUE;
+    if (alertMsg.indexOf("YELLOW") >= 0) return COLOR_FLAG_YELLOW;
+    if (alertMsg.indexOf("GREEN") >= 0) return COLOR_FLAG_GREEN;
+    if (alertMsg.indexOf("PIT") >= 0) return COLOR_ALERT_WARNING;  // Orange
+    if (alertMsg.indexOf("FINISHED") >= 0 || alertMsg.indexOf("CHECKERED") >= 0) return COLOR_FLAG_CHECKERED;
+    if (alertMsg.indexOf("MEATBALL") >= 0) return COLOR_ALERT_WARNING;
+    if (alertMsg.indexOf("SLOW") >= 0) return COLOR_FLAG_WHITE;
+    return COLOR_ALERT_CRITICAL;  // Red (LOW FUEL, ENGINE OFF, etc.)
+}
+
 /**
  * Update LEDs based on telemetry data
  * Called from SHCustomProtocol with telemetry values
@@ -581,10 +593,12 @@ void updateCustomLEDs(
     }
 
     // Override with critical alerts (highest priority)
+    // Use color that matches the alert type (blue flag = blue, yellow = yellow, etc.)
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
+        RgbColor alertLedColor = getAlertLedColor(alertMessage);
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
         if (alertBlink) {
-            setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, COLOR_ALERT_CRITICAL);
+            setLedsColor(LED_LEFT_START, LED_LEFT_COUNT, alertLedColor);
         }
     }
 
@@ -671,10 +685,12 @@ void updateCustomLEDs(
     }
 
     // Override with critical alerts (highest priority - same as left side)
+    // Use color that matches the alert type
     if (alertMessage != "" && alertMessage != "NORMAL" && alertMessage != "None") {
+        RgbColor alertLedColor = getAlertLedColor(alertMessage);
         bool alertBlink = (millis() / 250) % 2 == 0;  // Fast blink for alerts
         if (alertBlink) {
-            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, COLOR_ALERT_CRITICAL);
+            setLedsColor(LED_RIGHT_START, LED_RIGHT_COUNT, alertLedColor);
         }
     }
 

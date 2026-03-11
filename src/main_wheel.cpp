@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "driver/gpio.h"  // IDF GPIO — needed to force GPIO_FLOATING after analogSetPinAttenuation
 #include "USB.h"
 #include "USBHID.h"
 #include "USBHIDConsumerControl.h"
@@ -52,21 +53,26 @@ static const uint8_t customGamepadDescriptor[] = {
     0x81, 0x01,       // Input (Const) - padding
 
     // --- 10 Axes ---
+    // IMPORTANT: macOS/IOKit sorts HID elements by usage VALUE within a page.
+    // Usage values: X=0x30, Y=0x31, Z=0x32, Rx=0x33, Ry=0x34, Rz=0x35, Slider=0x36, Dial=0x37, Vx=0x40, Vy=0x41
+    // So macOS assigns pygame axis indices in that order regardless of declaration order.
+    // The struct fields MUST match this physical byte order so data lines up correctly:
+    // axis 0=X(enc2), 1=Y(enc3), 2=Z(HallA), 3=Rx(enc4), 4=Ry(enc5), 5=Rz(HallB), 6=Slider(enc6), 7=Dial(enc7), 8=Vx(enc8), 9=Vy(enc9)
     0x05, 0x01,       // Usage Page (Generic Desktop)
     0x15, 0x81,       // Logical Minimum (-127)
     0x25, 0x7F,       // Logical Maximum (127)
     0x75, 0x08,       // Report Size (8)
     0x95, 0x0A,       // Report Count (10)
-    0x09, 0x30,       // Usage (X)
-    0x09, 0x31,       // Usage (Y)
-    0x09, 0x32,       // Usage (Z)
-    0x09, 0x35,       // Usage (Rz)
-    0x09, 0x33,       // Usage (Rx)
-    0x09, 0x34,       // Usage (Ry)
-    0x09, 0x36,       // Usage (Slider)
-    0x09, 0x37,       // Usage (Dial)
-    0x09, 0x40,       // Usage (Vx)
-    0x09, 0x41,       // Usage (Vy)
+    0x09, 0x30,       // Usage (X)      → axis 0 (ENC2 BB)
+    0x09, 0x31,       // Usage (Y)      → axis 1 (ENC3 MAP)
+    0x09, 0x32,       // Usage (Z)      → axis 2 (Hall A / GPIO1)
+    0x09, 0x33,       // Usage (Rx)     → axis 3 (ENC4 TC)
+    0x09, 0x34,       // Usage (Ry)     → axis 4 (ENC5 ABS)
+    0x09, 0x35,       // Usage (Rz)     → axis 5 (Hall B / GPIO2)
+    0x09, 0x36,       // Usage (Slider) → axis 6 (ENC6 Lat.1)
+    0x09, 0x37,       // Usage (Dial)   → axis 7 (ENC7 Lat.2)
+    0x09, 0x40,       // Usage (Vx)     → axis 8 (ENC8 Lat.3)
+    0x09, 0x41,       // Usage (Vy)     → axis 9 (ENC9 Lat.4)
     0x81, 0x02,       // Input (Data,Var,Abs)
     0xC0              // End Collection
 };
@@ -112,6 +118,7 @@ uint64_t buttons = 0;
 
 static const uint8_t HID_MAX_BUTTONS = 64;
 static const uint8_t MATRIX_HID_MAX = 37; // slots usados: 1-5 enc SWs, 9-14 LEDs esq, 17-22 LEDs dir, 25-30 5-way+SHIFT, 33-37 borb+tras+extra
+static const bool REPORT_SHIFT_IN_HID = true; // debug: expose slot 30 in HID monitor
 
 // ================================
 // PINOUT - ESP32-S3-WROOM1 N8R8
@@ -152,12 +159,13 @@ const EncoderPins encoderPins[NUM_ENCODERS] = {
 };
 
 // Hall sensors
-static const uint8_t HALL_A_PIN = 1;
-static const uint8_t HALL_B_PIN = 2;
+static const uint8_t HALL_A_PIN = 1;  // GPIO1 (ADC1_CH0) — Hall A clutch
+static const uint8_t HALL_B_PIN = 2;  // GPIO2 (ADC1_CH1) — Hall B clutch
 
 // UART to WT32 (also used for debug output via CH340 on Mac)
-HardwareSerial ButtonBoxSerial(1);
+HardwareSerial ButtonBoxSerial(0);
 static const uint32_t UART_BAUD = 115200;
+static const int UART_RX_PIN = 11;
 static const int UART_TX_PIN = 43;
 
 // Debug UART (goes through CH340 to Mac for monitoring)
@@ -166,13 +174,19 @@ static const int UART_TX_PIN = 43;
 #define DBG(msg) ButtonBoxSerial.println(msg)
 #define DBGF(...) { char _dbuf[128]; snprintf(_dbuf, sizeof(_dbuf), __VA_ARGS__); ButtonBoxSerial.println(_dbuf); }
 
+void scanI2CBusDebug();
+void uartRoundtripTask();
+void handleWt32UartRx();
+
 // ================================
 // MATRIX STATE
 // ================================
 bool buttonStates[MATRIX_ROWS][MATRIX_COLS] = {false};
 bool prevButtonStates[MATRIX_ROWS][MATRIX_COLS] = {false};
 unsigned long lastDebounceTime[MATRIX_ROWS][MATRIX_COLS] = {0};
+unsigned long lastStableToggleTime[MATRIX_ROWS][MATRIX_COLS] = {0};
 const unsigned long DEBOUNCE_DELAY = 30;
+const unsigned long MIN_TOGGLE_INTERVAL_MS = 120;
 
 inline uint8_t getButtonNumber(uint8_t row, uint8_t col) {
     return (row * MATRIX_COLS) + col + 1;
@@ -186,6 +200,8 @@ inline bool isButtonPressed(uint8_t buttonNum) {
 // Buttons reserved
 static const uint8_t BUTTON_MFC = 1;   // Slot 1
 static const uint8_t BUTTON_SHIFT = 30; // Slot 30 (internal only)
+static const bool MFC_DEBUG_LOG = true;
+static const bool ENCODER_DIR_DEBUG_LOG = true;
 
 // 5-way joystick slots (HAT/POV + center button)
 // Directions are consumed by HAT logic and NOT reported as individual HID buttons
@@ -275,6 +291,7 @@ void setupLEDs() {
     Wire.beginTransmission(LED_PCA_ADDR);
     if (Wire.endTransmission() != 0) {
         DBG("[WARN] PCA9685 not found at 0x40 - front LEDs disabled");
+        scanI2CBusDebug();
         ledAvailable = false;
         return;
     }
@@ -332,9 +349,15 @@ void ledApplyBrightness(int16_t bright255) {
     ledIdleBase = (uint16_t)map(constrain((int)bright255, 15, 255), 15, 255, 300, 3600);
 }
 
+// Throttle: LED update only every LED_UPDATE_INTERVAL_MS (~60fps)
+static const unsigned long LED_UPDATE_INTERVAL_MS = 16;
+static unsigned long lastLedUpdateMs = 0;
+
 void ledUpdate() {
     if (!ledAvailable) return;
     unsigned long now = millis();
+    if ((now - lastLedUpdateMs) < LED_UPDATE_INTERVAL_MS) return;
+    lastLedUpdateMs = now;
     bool shiftActive = isButtonPressed(BUTTON_SHIFT);
 
     // SHIFT mode: alternating even/odd channel blink
@@ -390,20 +413,24 @@ void ledUpdate() {
 // ENCODERS
 // ================================
 struct EncoderState {
-    int8_t lastEncoded;
+    int8_t  lastEncoded;
     int32_t encoderValue;
-    bool lastA;
-    bool lastB;
+    bool    lastA;
+    bool    lastB;
     unsigned long lastChangeTime;
-    float smoothedValue;
-    int8_t lastSentValue;
-    int8_t accumulator;
+    int8_t  accumulator;
 };
 
 EncoderState encoderStates[NUM_ENCODERS];
-const unsigned long ENCODER_DEBOUNCE_US = 800;
-const float ENCODER_SMOOTHING = 0.55;
-const int8_t ENCODER_THRESHOLD = 1;
+
+// Single debounce for contact bounce rejection (µs).
+// The 4-step accumulator already rejects directional noise.
+static const unsigned long ENCODER_DEBOUNCE_US = 100;
+
+// EC11 encoders produce 4 gray-code transitions per detent click.
+// Threshold = 4 → exactly 1 step per physical click. Clean, no half-steps.
+static const int8_t ENCODER_DETENT_TRANSITIONS = 4;
+
 const int8_t ENC_TABLE[16] = {
     0, -1,  1, 0,
     1,  0,  0,-1,
@@ -466,6 +493,17 @@ ClutchConfig clutchCfg;
 
 bool calibratingHall = false;
 bool adjustingBite = false;
+
+// Hall/clutch anti-noise (helps when halls are not connected yet)
+static const uint8_t CLUTCH_RAW_FILTER_SHIFT = 4;  // IIR: 1/16 — light smoothing after median; keeps response fast
+static const int8_t  CLUTCH_AXIS_DEADZONE = 10;    // minimum HID delta to report (suppresses ~±30 count idle jitter)
+static const uint8_t HALL_MEDIAN_SAMPLES = 7;       // odd number — median rejects random spikes regardless of magnitude
+bool     clutchFilterInit = false;
+int32_t  clutchRawAFiltered = 0;
+int32_t  clutchRawBFiltered = 0;
+static const bool HALL_RAW_DEBUG = true;
+static const unsigned long HALL_RAW_DEBUG_MS = 100;
+unsigned long lastHallRawDebugMs = 0;
 
 // ================================
 // MFC MENU (Adjustable Mode)
@@ -543,8 +581,8 @@ VirtualButtonPulse mfcVirtualButtons[10] = {
 };
 
 // Matrix button slots for multimedia (when VOL_SYS active)
-static const uint8_t BUTTON_RADIO = 10;  // Slot 10 = MUTE
-static const uint8_t BUTTON_FLASH = 11;  // Slot 11 = PLAY/PAUSE
+static const uint8_t BUTTON_RADIO = 13;  // Slot 13 = MUTE   (GPB1/GPA4)
+static const uint8_t BUTTON_FLASH = 14;  // Slot 14 = PLAY/PAUSE (GPB1/GPA5)
 
 // ================================
 // UTILITIES
@@ -553,32 +591,35 @@ static const uint8_t BUTTON_FLASH = 11;  // Slot 11 = PLAY/PAUSE
 typedef struct __attribute__((packed)) {
     uint64_t buttons;
     uint8_t hat;        // HAT/POV: 4 bits value + 4 bits padding
-    int8_t x;
-    int8_t y;
-    int8_t z;
-    int8_t rz;
-    int8_t rx;
-    int8_t ry;
-    int8_t slider;
-    int8_t dial;
-    int8_t vx;
-    int8_t vy;
+    // Axis byte order MUST match HID descriptor declaration order:
+    // X(0x30), Y(0x31), Z(0x32), Rx(0x33), Ry(0x34), Rz(0x35), Slider(0x36), Dial(0x37), Vx(0x40), Vy(0x41)
+    // macOS sorts pygame axis indices by usage value, so this order matches pygame axis 0-9.
+    int8_t x;       // axis 0 – ENC2 (BB)
+    int8_t y;       // axis 1 – ENC3 (MAP)
+    int8_t z;       // axis 2 – Hall A (GPIO1, Clutch L)
+    int8_t rx;      // axis 3 – ENC4 (TC)
+    int8_t ry;      // axis 4 – ENC5 (ABS)
+    int8_t rz;      // axis 5 – Hall B (GPIO2, Clutch R)
+    int8_t slider;  // axis 6 – ENC6 (Lat.1)
+    int8_t dial;    // axis 7 – ENC7 (Lat.2)
+    int8_t vx;      // axis 8 – ENC8 (Lat.3)
+    int8_t vy;      // axis 9 – ENC9 (Lat.4)
 } GamepadReport;
 
 void sendGamepad() {
     GamepadReport report = {
         buttons,
         hatValue,   // 0 = null/released, 1-8 = directions
-        axisX,
-        axisY,
-        axisZ,
-        axisRZ,
-        axisRX,
-        axisRY,
-        axisSlider,
-        axisDial,
-        axisVx,
-        axisVy
+        axisX,      // X  → axis 0
+        axisY,      // Y  → axis 1
+        axisZ,      // Z  → axis 2 (Hall A)
+        axisRX,     // Rx → axis 3 (ENC4)
+        axisRY,     // Ry → axis 4 (ENC5)
+        axisRZ,     // Rz → axis 5 (Hall B)
+        axisSlider, // Slider → axis 6
+        axisDial,   // Dial   → axis 7
+        axisVx,     // Vx     → axis 8
+        axisVy      // Vy     → axis 9
     };
     Gamepad.sendReport(&report, sizeof(report));
 }
@@ -594,6 +635,74 @@ void uartSendInt(const char* cat, const char* func, int value) {
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "$%s:%s:%d\n", cat, func, value);
     ButtonBoxSerial.print(buffer);
+}
+
+// ================================
+// UART roundtrip test (Wheel <-> WT32)
+// ================================
+String wt32RxLine;
+uint16_t uartPingSeq = 0;
+uint16_t uartPingPendingSeq = 0;
+unsigned long uartPingSentAtMs = 0;
+unsigned long uartLastPingAtMs = 0;
+static const unsigned long UART_PING_INTERVAL_MS = 1500;
+static const unsigned long UART_PING_TIMEOUT_MS = 1200;
+
+void handleWt32UartRx() {
+    while (ButtonBoxSerial.available()) {
+        char c = (char)ButtonBoxSerial.read();
+        if (c == '\r') continue;
+
+        if (c == '\n') {
+            if (wt32RxLine.length() > 0) {
+                DBGF("[UART] RX raw: %s", wt32RxLine.c_str());
+                if (wt32RxLine.startsWith("$WT:PONG:")) {
+                    String seqStr = wt32RxLine.substring(9);
+                    seqStr.trim();
+                    uint16_t seq = (uint16_t)seqStr.toInt();
+
+                    if (uartPingPendingSeq != 0 && seq == uartPingPendingSeq) {
+                        unsigned long rtt = millis() - uartPingSentAtMs;
+                        DBGF("[UART] PONG seq=%u RTT=%lums", (unsigned)seq, rtt);
+                        uartPingPendingSeq = 0;
+                    } else {
+                        DBGF("[UART] PONG unexpected seq=%u pending=%u",
+                             (unsigned)seq,
+                             (unsigned)uartPingPendingSeq);
+                    }
+                }
+            }
+            wt32RxLine = "";
+            continue;
+        }
+
+        if (wt32RxLine.length() < 80) {
+            wt32RxLine += c;
+        }
+    }
+}
+
+void uartRoundtripTask() {
+    unsigned long now = millis();
+
+    if (uartPingPendingSeq != 0) {
+        if ((now - uartPingSentAtMs) >= UART_PING_TIMEOUT_MS) {
+            DBGF("[UART] PING timeout seq=%u", (unsigned)uartPingPendingSeq);
+            uartPingPendingSeq = 0;
+        }
+        return;
+    }
+
+    if ((now - uartLastPingAtMs) < UART_PING_INTERVAL_MS) return;
+    uartLastPingAtMs = now;
+
+    uartPingSeq++;
+    if (uartPingSeq == 0) uartPingSeq = 1;
+    uartPingPendingSeq = uartPingSeq;
+    uartPingSentAtMs = now;
+
+    uartSendInt("BB", "PING", (int)uartPingPendingSeq);
+    DBGF("[UART] PING seq=%u", (unsigned)uartPingPendingSeq);
 }
 
 void sendConsumerControl(uint16_t code) {
@@ -615,11 +724,27 @@ void saveConfig() {
 }
 
 void loadConfig() {
-    clutchCfg.mode = (ClutchMode)prefs.getUChar("clMode", CLUTCH_DUAL);
-    clutchCfg.hallMinA = prefs.getUShort("h1min", 0);
-    clutchCfg.hallMaxA = prefs.getUShort("h1max", 4095);
-    clutchCfg.hallMinB = prefs.getUShort("h2min", 0);
-    clutchCfg.hallMaxB = prefs.getUShort("h2max", 4095);
+    clutchCfg.mode = CLUTCH_DUAL;
+    // Load saved calibration; default to a sensible narrow range (not 0-4095)
+    // so both halls register movement even before a proper calibration is done.
+    clutchCfg.hallMinA = prefs.getUShort("h1min", 1400);
+    clutchCfg.hallMaxA = prefs.getUShort("h1max", 2200);
+    clutchCfg.hallMinB = prefs.getUShort("h2min", 1400);
+    clutchCfg.hallMaxB = prefs.getUShort("h2max", 2200);
+
+    // Sanity check: if range is too wide (>2000 counts = old 0–4095 default saved to flash),
+    // old/corrupt calibration — reset both halls to sensible defaults so movement is visible.
+    if (clutchCfg.hallMaxA <= clutchCfg.hallMinA || (clutchCfg.hallMaxA - clutchCfg.hallMinA) > 2000) {
+        DBG("[HALL] Hall A cal invalid/too wide — resetting to defaults 1400-2200");
+        clutchCfg.hallMinA = 1400; clutchCfg.hallMaxA = 2200;
+    }
+    if (clutchCfg.hallMaxB <= clutchCfg.hallMinB || (clutchCfg.hallMaxB - clutchCfg.hallMinB) > 2000) {
+        DBG("[HALL] Hall B cal invalid/too wide — resetting to defaults 1400-2200");
+        clutchCfg.hallMinB = 1400; clutchCfg.hallMaxB = 2200;
+    }
+    DBGF("[HALL] loadConfig: A[%u-%u] B[%u-%u]",
+        clutchCfg.hallMinA, clutchCfg.hallMaxA,
+        clutchCfg.hallMinB, clutchCfg.hallMaxB);
     clutchCfg.bitePoint = prefs.getUChar("bite", 60);
     encoderButtonMode = prefs.getBool("encBtn", false);
     ersMode = prefs.getUChar("ersMode", ERS_BALANCED);
@@ -644,8 +769,9 @@ void triggerVirtualButton(uint8_t btnId, uint16_t durationMs = 100);
 void uartSend(const char* cat, const char* func, const char* val);
 
 bool shouldReportMatrixButton(uint8_t buttonNum) {
-    // Exclude SHIFT (slot 30) and 5-way directions (slots 25-28) from HID buttons
+    // Exclude 5-way directions (slots 25-28) from HID buttons
     // Directions are handled by HAT switch instead
+    if (!REPORT_SHIFT_IN_HID && buttonNum == BUTTON_SHIFT) return false;
     if (isFivewayDirection(buttonNum)) return false;
     return buttonNum <= MATRIX_HID_MAX;
 }
@@ -655,11 +781,46 @@ bool shouldReportMatrixButton(uint8_t buttonNum) {
 // ================================
 bool mcpAvailable = false;
 
+void scanI2CBusDebug() {
+    int sclLevel = digitalRead(I2C_SCL);
+    int sdaLevel = digitalRead(I2C_SDA);
+    DBGF("[I2C] Line state: SCL=%d SDA=%d (expected both HIGH=1 when idle)", sclLevel, sdaLevel);
+
+    DBG("[I2C] Probing known addresses...");
+    bool foundAny = false;
+
+    Wire.beginTransmission(0x20);
+    if (Wire.endTransmission() == 0) {
+        DBG("[I2C] Found MCP23017 at 0x20");
+        foundAny = true;
+    } else {
+        DBG("[I2C] No response at 0x20 (MCP23017)");
+    }
+
+    Wire.beginTransmission(0x40);
+    if (Wire.endTransmission() == 0) {
+        DBG("[I2C] Found PCA9685 at 0x40");
+        foundAny = true;
+    } else {
+        DBG("[I2C] No response at 0x40 (PCA9685)");
+    }
+
+    if (!foundAny) {
+        DBG("[I2C] No known devices responded");
+    }
+}
+
 void setupButtonMatrix() {
     Wire.begin(I2C_SDA, I2C_SCL);
+    Wire.setClock(400000);
+    Wire.setTimeOut(20);
+    DBG("[I2C] Bus configured: 400kHz, timeout=20ms");
 
     if (!mcp.begin_I2C(0x20)) {
         DBG("[ERROR] MCP23017 NOT FOUND at 0x20!");
+        DBG("[HINT] Check MCP: pin9=3.3V, pin10=GND, pin12=SCL(GPIO9), pin13=SDA(GPIO8), pin18=RESET(3.3V), pin15/16/17=A0/A1/A2(GND)");
+        DBG("[HINT] If scan finds none: add 4.7k pull-up on SDA->3.3V and SCL->3.3V");
+        scanI2CBusDebug();
         DBG("[WARN] Continuing without matrix - USB HID will still work");
         mcpAvailable = false;
         return;  // Don't halt - let USB still enumerate
@@ -678,16 +839,25 @@ void setupButtonMatrix() {
     }
 }
 
+// Throttle: matrix scan only every MATRIX_SCAN_INTERVAL_MS
+static const unsigned long MATRIX_SCAN_INTERVAL_MS = 3;
+static unsigned long lastMatrixScanMs = 0;
+
 void scanButtonMatrix() {
-    if (!mcpAvailable) return;  // Skip if MCP23017 not found
+    if (!mcpAvailable) return;
     unsigned long currentTime = millis();
+    if ((currentTime - lastMatrixScanMs) < MATRIX_SCAN_INTERVAL_MS) return;
+    lastMatrixScanMs = currentTime;
 
     for (uint8_t col = 0; col < MATRIX_COLS; col++) {
         mcp.digitalWrite(col, LOW);
-        delayMicroseconds(10);
+        delayMicroseconds(5);
+
+        // Bulk-read all 8 row pins at once (1 I2C transaction instead of 8)
+        uint8_t rowBits = mcp.readGPIO(1); // port B = rows
 
         for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-            bool reading = (mcp.digitalRead(8 + row) == LOW);
+            bool reading = !(rowBits & (1 << row)); // active LOW
 
             if (reading != prevButtonStates[row][col]) {
                 lastDebounceTime[row][col] = currentTime;
@@ -695,13 +865,23 @@ void scanButtonMatrix() {
 
             if ((currentTime - lastDebounceTime[row][col]) > DEBOUNCE_DELAY) {
                 if (reading != buttonStates[row][col]) {
+                    if ((currentTime - lastStableToggleTime[row][col]) < MIN_TOGGLE_INTERVAL_MS) {
+                        prevButtonStates[row][col] = reading;
+                        continue;
+                    }
+
                     buttonStates[row][col] = reading;
+                    lastStableToggleTime[row][col] = currentTime;
 
                     uint8_t buttonNum = getButtonNumber(row, col);
 
                     // Trigger LED flash on press
                     if (reading) {
                         ledTriggerFlash(buttonNum);
+                    }
+
+                    if (buttonNum == BUTTON_SHIFT) {
+                        DBG(reading ? "[SHIFT] DOWN" : "[SHIFT] UP");
                     }
 
                     // 5-way directions → update HAT switch (not individual buttons)
@@ -739,8 +919,6 @@ void setupEncoders() {
         encoderStates[i].lastA = digitalRead(encoderPins[i].pinA);
         encoderStates[i].lastB = digitalRead(encoderPins[i].pinB);
         encoderStates[i].lastChangeTime = 0;
-        encoderStates[i].smoothedValue = 0.0;
-        encoderStates[i].lastSentValue = 0;
         encoderStates[i].accumulator = 0;
     }
 }
@@ -782,6 +960,17 @@ void handleEncoderButton(uint8_t idx, int8_t step) {
 
 void handleMfcRotate(int8_t step) {
     bool shiftPressed = isButtonPressed(BUTTON_SHIFT);
+    const char* dir = (step > 0) ? "CW" : "CCW";
+
+    if (MFC_DEBUG_LOG) {
+        DBGF("[MFC ENC1] ROT dir=%s step=%+d shift=%d adjust=%d idx=%d item=%s",
+             dir,
+             step,
+             shiftPressed ? 1 : 0,
+             mfcAdjustMode ? 1 : 0,
+             mfcIndex,
+             mfcMenuNames[mfcIndex]);
+    }
 
     // SHIFT + MFC rotation: jump 2 items instead of 1
     if (shiftPressed && !mfcAdjustMode) {
@@ -819,12 +1008,12 @@ void handleMfcRotate(int8_t step) {
             // HID Consumer Control Volume (implemented separately)
             sendConsumerControl(step > 0 ? 0xE9 : 0xEA); // Volume Up/Down
         } else if (item == MFC_VOL_A) {
-            // Virtual buttons 66 (UP) / 67 (DN)
-            triggerVirtualButton(step > 0 ? 66 : 67);
+            // Virtual buttons 36 (UP) / 37 (DN)
+            triggerVirtualButton(step > 0 ? 36 : 37);
             sendGamepad();
         } else if (item == MFC_VOL_B) {
-            // Virtual buttons 68 (UP) / 69 (DN)
-            triggerVirtualButton(step > 0 ? 68 : 69);
+            // Virtual buttons 38 (UP) / 39 (DN)
+            triggerVirtualButton(step > 0 ? 38 : 39);
             sendGamepad();
         } else if (item == MFC_TC2) {
             // Virtual buttons 60 (UP) / 61 (DN)
@@ -835,8 +1024,8 @@ void handleMfcRotate(int8_t step) {
             triggerVirtualButton(step > 0 ? 62 : 63);
             sendGamepad();
         } else if (item == MFC_TYRE) {
-            // Virtual buttons 64 (UP) / 65 (DN)
-            triggerVirtualButton(step > 0 ? 64 : 65);
+            // Virtual buttons 64 (UP) / 35 (DN)
+            triggerVirtualButton(step > 0 ? 64 : 35);
             sendGamepad();
         } else if (item == MFC_ERS) {
             ersMode = (ersMode + 1) % ERS_COUNT;
@@ -866,52 +1055,67 @@ void scanEncoders() {
         bool currentA = digitalRead(encoderPins[i].pinA);
         bool currentB = digitalRead(encoderPins[i].pinB);
 
+        // Only process when a pin actually changed
         if (currentA != encoderStates[i].lastA || currentB != encoderStates[i].lastB) {
+            encoderStates[i].lastA = currentA;
+            encoderStates[i].lastB = currentB;
+
+            // Minimal contact-bounce debounce
             unsigned long now = micros();
-            if (now - encoderStates[i].lastChangeTime < ENCODER_DEBOUNCE_US) {
+            if ((now - encoderStates[i].lastChangeTime) < ENCODER_DEBOUNCE_US) {
                 continue;
             }
             encoderStates[i].lastChangeTime = now;
 
+            // Gray-code state machine
             int8_t encoded = (currentA << 1) | currentB;
-            uint8_t state = ((encoderStates[i].lastEncoded << 2) | encoded) & 0x0F;
-            encoderStates[i].accumulator += ENC_TABLE[state];
+            uint8_t tableIdx = ((encoderStates[i].lastEncoded << 2) | encoded) & 0x0F;
+            encoderStates[i].accumulator += ENC_TABLE[tableIdx];
             encoderStates[i].lastEncoded = encoded;
 
+            // Full detent reached? (4 consistent transitions = 1 physical click)
             int8_t step = 0;
-            if (encoderStates[i].accumulator >= 2) {
+            if (encoderStates[i].accumulator >= ENCODER_DETENT_TRANSITIONS) {
                 step = 1;
-                encoderStates[i].accumulator = 0;
-            } else if (encoderStates[i].accumulator <= -2) {
+                encoderStates[i].accumulator = 0;  // clean reset
+            } else if (encoderStates[i].accumulator <= -ENCODER_DETENT_TRANSITIONS) {
                 step = -1;
-                encoderStates[i].accumulator = 0;
+                encoderStates[i].accumulator = 0;  // clean reset
             }
 
-            if (step != 0) {
-                encoderStates[i].encoderValue += step;
+            if (step == 0) continue;
 
+            // --- Valid step detected ---
+            encoderStates[i].encoderValue += step;
+
+            if (ENCODER_DIR_DEBUG_LOG) {
+                const char* dir = (step > 0) ? "CW" : "CCW";
                 if (i == 0) {
-                    handleMfcRotate(step);
-                } else if (i >= 1 && i <= 8) {
-                    if (encoderButtonMode) {
-                        handleEncoderButton(i, step);
-                    } else {
-                        encoderStates[i].smoothedValue = (ENCODER_SMOOTHING * encoderStates[i].encoderValue) +
-                                                          ((1.0 - ENCODER_SMOOTHING) * encoderStates[i].smoothedValue);
-                        int8_t smoothed = (int8_t)round(encoderStates[i].smoothedValue);
-                        int8_t val = constrain(smoothed, -127, 127);
-
-                        if (abs(val - encoderStates[i].lastSentValue) >= ENCODER_THRESHOLD) {
-                            encoderStates[i].lastSentValue = val;
-                            handleEncoderAxis(i, val);
-                        }
-                    }
+                    DBGF("[ENC1 MFC] %s val=%d", dir, (int)encoderStates[i].encoderValue);
+                } else {
+                    DBGF("[ENC%u] %s val=%d mode=%s",
+                         (unsigned)(i + 1), dir,
+                         (int)encoderStates[i].encoderValue,
+                         encoderButtonMode ? "BTN" : "AXIS");
                 }
             }
-        }
 
-        encoderStates[i].lastA = currentA;
-        encoderStates[i].lastB = currentB;
+            if (i == 0) {
+                handleMfcRotate(step);
+            } else {
+                if (encoderButtonMode) {
+                    handleEncoderButton(i, step);
+                } else {
+                    // Direct axis output — no smoothing, no threshold, zero lag
+                    int8_t val = (int8_t)constrain(encoderStates[i].encoderValue, -127, 127);
+                    handleEncoderAxis(i, val);
+                }
+            }
+        } else {
+            // Pins unchanged — update lastA/lastB for next comparison
+            encoderStates[i].lastA = currentA;
+            encoderStates[i].lastB = currentB;
+        }
     }
 }
 
@@ -928,7 +1132,7 @@ void releaseVirtualButtonPulses() {
         }
     }
 
-    // Release MFC menu virtual buttons (buttons 60-69)
+    // Release MFC menu virtual buttons
     for (auto &pulse : mfcVirtualButtons) {
         if (pulse.active && now >= pulse.releaseAt) {
             buttons &= ~(1ULL << (pulse.id - 1));
@@ -945,19 +1149,69 @@ void releaseVirtualButtonPulses() {
 // ================================
 // CLUTCH + HALL
 // ================================
-void updateClutches() {
-    uint16_t rawA = analogRead(HALL_A_PIN);
-    uint16_t rawB = analogRead(HALL_B_PIN);
+// Insertion sort (in-place) for small arrays
+static void sortU16(uint16_t* arr, uint8_t n) {
+    for (uint8_t i = 1; i < n; i++) {
+        uint16_t key = arr[i];
+        int8_t j = i - 1;
+        while (j >= 0 && arr[j] > key) { arr[j + 1] = arr[j]; j--; }
+        arr[j + 1] = key;
+    }
+}
 
-    if (calibratingHall) {
-        if (rawA < clutchCfg.hallMinA) clutchCfg.hallMinA = rawA;
-        if (rawA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = rawA;
-        if (rawB < clutchCfg.hallMinB) clutchCfg.hallMinB = rawB;
-        if (rawB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = rawB;
+// Median of HALL_MEDIAN_SAMPLES readings — immune to spikes of any magnitude
+// Settling delay between consecutive reads prevents ADC channel crosstalk.
+static uint16_t hallReadMedian(uint8_t pin) {
+    uint16_t buf[HALL_MEDIAN_SAMPLES];
+    for (uint8_t i = 0; i < HALL_MEDIAN_SAMPLES; i++) {
+        buf[i] = analogRead(pin);
+        delayMicroseconds(20);
+    }
+    sortU16(buf, HALL_MEDIAN_SAMPLES);
+    return buf[HALL_MEDIAN_SAMPLES / 2];
+}
+
+void updateClutches() {
+    // Read Hall with median filter; extra delay between channels prevents crosstalk
+    uint16_t rawA = hallReadMedian(HALL_A_PIN);
+    delayMicroseconds(50);
+    uint16_t rawB = hallReadMedian(HALL_B_PIN);
+
+    if (HALL_RAW_DEBUG) {
+        unsigned long nowMs = millis();
+        if (nowMs - lastHallRawDebugMs >= HALL_RAW_DEBUG_MS) {
+            lastHallRawDebugMs = nowMs;
+            int8_t dbgA = mapHallToAxis(rawA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
+            int8_t dbgB = mapHallToAxis(rawB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
+            DBGF("[HALL RAW] GPIO4=%u GPIO2=%u | filt A=%ld B=%ld | mapped A=%d B=%d | cal A[%u-%u] B[%u-%u]",
+                rawA, rawB, clutchRawAFiltered, clutchRawBFiltered, dbgA, dbgB,
+                clutchCfg.hallMinA, clutchCfg.hallMaxA,
+                clutchCfg.hallMinB, clutchCfg.hallMaxB);
+        }
     }
 
-    int8_t a = mapHallToAxis(rawA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
-    int8_t b = mapHallToAxis(rawB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
+    // Low-pass raw hall readings to suppress floating input jitter
+    if (!clutchFilterInit) {
+        clutchRawAFiltered = rawA;
+        clutchRawBFiltered = rawB;
+        clutchFilterInit = true;
+    } else {
+        clutchRawAFiltered += ((int32_t)rawA - clutchRawAFiltered) >> CLUTCH_RAW_FILTER_SHIFT;
+        clutchRawBFiltered += ((int32_t)rawB - clutchRawBFiltered) >> CLUTCH_RAW_FILTER_SHIFT;
+    }
+
+    uint16_t filtA = (uint16_t)constrain(clutchRawAFiltered, 0, 4095);
+    uint16_t filtB = (uint16_t)constrain(clutchRawBFiltered, 0, 4095);
+
+    if (calibratingHall) {
+        if (filtA < clutchCfg.hallMinA) clutchCfg.hallMinA = filtA;
+        if (filtA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = filtA;
+        if (filtB < clutchCfg.hallMinB) clutchCfg.hallMinB = filtB;
+        if (filtB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = filtB;
+    }
+
+    int8_t a = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
+    int8_t b = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
 
     int8_t outA = a;
     int8_t outB = b;
@@ -1010,7 +1264,9 @@ void updateClutches() {
     // Apply persistent channel swap (SHIFT+both-paddles combo toggles this)
     int8_t finalA = clutchChannelsSwapped ? outB : outA;
     int8_t finalB = clutchChannelsSwapped ? outA : outB;
-    if (finalA != axisZ || finalB != axisRZ) {
+
+    // Report only meaningful clutch changes to avoid noise spam on floating inputs
+    if (abs(finalA - axisZ) >= CLUTCH_AXIS_DEADZONE || abs(finalB - axisRZ) >= CLUTCH_AXIS_DEADZONE) {
         axisZ = finalA;
         axisRZ = finalB;
         sendGamepad();
@@ -1055,6 +1311,10 @@ void handleMfcPress() {
     bool mfcPressed = isButtonPressed(BUTTON_MFC);
     bool shiftPressed = isButtonPressed(BUTTON_SHIFT);
 
+    if (MFC_DEBUG_LOG && mfcPressed != lastMfcPressed) {
+        DBGF("[MFC SW] %s shift=%d", mfcPressed ? "DOWN" : "UP", shiftPressed ? 1 : 0);
+    }
+
     // SHIFT + MFC: timing-based disambiguation
     if (mfcPressed && shiftPressed) {
         if (mfcPressStart == 0) {
@@ -1073,6 +1333,9 @@ void handleMfcPress() {
                 }
                 saveConfig();
                 uartSend("MODE", "ENC", encoderButtonMode ? "BTN" : "AXIS");
+                if (MFC_DEBUG_LOG) {
+                    DBGF("[MFC MODE] ENC_MODE=%s (hold=%lums)", encoderButtonMode ? "BTN" : "AXIS", holdTime);
+                }
                 sendGamepad();
             }
         }
@@ -1082,6 +1345,10 @@ void handleMfcPress() {
 
         if (holdTime < MODE_HOLD_MS && holdTime > 50) {  // Valid short press
             MfcMenuItem item = (MfcMenuItem)mfcIndex;
+
+            if (MFC_DEBUG_LOG) {
+                DBGF("[MFC SW] SHORT hold=%lums item=%s", holdTime, mfcMenuNames[item]);
+            }
 
             // Short press presets (item-specific)
             if (item == MFC_PAGE) {
@@ -1195,6 +1462,9 @@ void handleMfcPress() {
                 }
                 saveConfig();
                 uartSend("MODE", "ENC", encoderButtonMode ? "BTN" : "AXIS");
+                if (MFC_DEBUG_LOG) {
+                    DBGF("[MFC MODE] ENC_MODE=%s (menu toggle)", encoderButtonMode ? "BTN" : "AXIS");
+                }
             } else if (item == MFC_ERS) {
                 ersMode = (ersMode + 1) % ERS_COUNT;
                 saveConfig();
@@ -1265,7 +1535,7 @@ void handleShiftClutchCombo() {
 void setup() {
     // FIRST: Initialize debug UART through CH340 (GPIO 43)
     // This is the ONLY way to see debug on Mac with USB_MODE=0
-    ButtonBoxSerial.begin(UART_BAUD, SERIAL_8N1, -1, UART_TX_PIN);
+    ButtonBoxSerial.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
     delay(100);
     DBG("========================================");
     DBG(">>> ESP-ButtonBox-WHEEL FIRMWARE <<<");
@@ -1298,22 +1568,40 @@ void setup() {
 
     prefs.begin("wheel", false);
     loadConfig();
+    // Sem encoders/MFC disponíveis, força modo previsível para teste dos halls
+    clutchCfg.mode = CLUTCH_DUAL;
+    clutchChannelsSwapped = false;
     DBG("[BOOT] Preferences loaded");
 
+    // Configure ADC for Hall sensors (0-3.3V range)
+    // analogSetPinAttenuation internally calls IDF adc1_config_channel_atten which
+    // re-enables the pad pull-up, overriding any prior pinMode(INPUT).
+    // Fix: call gpio_set_pull_mode(GPIO_FLOATING) via IDF AFTER attenuation setup.
     analogReadResolution(12);
+    analogSetPinAttenuation(HALL_A_PIN, ADC_11db);  // GPIO1: 0-3.3V
+    analogSetPinAttenuation(HALL_B_PIN, ADC_11db);  // GPIO2: 0-3.3V
+    gpio_set_pull_mode(GPIO_NUM_1, GPIO_FLOATING);  // disable pull-up re-enabled by IDF ADC init
+    gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);  // same for Hall B
+    DBG("[ADC] Hall sensor pins configured (GPIO1=HallA, GPIO2=HallB, 12-bit, 11dB, pull-up disabled)");
 
     DBG("[I2C] Setting up MCP23017 button matrix...");
     setupButtonMatrix();
-    DBG("[I2C] MCP23017 OK");
+    if (mcpAvailable) {
+        DBG("[I2C] MCP23017 OK at 0x20");
+    }
 
     DBG("[I2C] Setting up PCA9685 front LEDs...");
     setupLEDs();
-    ledBootSweep();
+    if (ledAvailable) {
+        DBG("[I2C] PCA9685 OK at 0x40");
+        ledBootSweep();
+    }
 
     setupEncoders();
     DBG("[BOOT] Encoders OK");
 
     uartSend("SYS", "BOOT", DEVICE_NAME);
+    DBG("[UART] Roundtrip enabled: TX=GPIO43 RX=GPIO11");
     DBG("========================================");
     DBG(">>> BOOT COMPLETE - WHEEL RUNNING <<<");
     DBG("========================================");
@@ -1352,14 +1640,20 @@ void handleMultimediaButtons() {
 }
 
 void loop() {
-    scanButtonMatrix();
+    handleWt32UartRx();
+    uartRoundtripTask();
+
+    // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
+    scanEncoders();
+
+    // I2C-heavy operations are internally throttled
+    scanButtonMatrix();       // every 3ms (was every loop = ~28ms I2C stall)
+    ledUpdate();              // every 16ms (~60fps, humans can't see faster)
+
+    // Lightweight operations — always run
     handleMfcPress();
     handleMultimediaButtons();
-    scanEncoders();
     releaseVirtualButtonPulses();
     updateClutches();
     handleShiftClutchCombo();
-    ledUpdate();
-
-    delay(1);
 }
