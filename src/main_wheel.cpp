@@ -466,6 +466,16 @@ VirtualButtonPulse encoderPulses[16] = {
     {54, false, 0}, {55, false, 0}
 };
 
+// SHIFT + ENC2-5 alternate functions. These HID bits are never set by matrix scan:
+// 25-28: isFivewayDirection() intercepts them before bits are set (HAT path)
+// 56-59: above MATRIX_HID_MAX=37, shouldReportMatrixButton() returns false
+VirtualButtonPulse encoderShiftPulses[8] = {
+    {25, false, 0}, {26, false, 0}, // SHIFT+ENC2 (BB)  CW/CCW → buttons 25/26
+    {27, false, 0}, {28, false, 0}, // SHIFT+ENC3 (MAP) CW/CCW → buttons 27/28
+    {56, false, 0}, {57, false, 0}, // SHIFT+ENC4 (TC)  CW/CCW → buttons 56/57
+    {58, false, 0}, {59, false, 0}  // SHIFT+ENC5 (ABS) CW/CCW → buttons 58/59
+};
+
 // ================================
 // CLUTCH CONFIG
 // ================================
@@ -510,39 +520,39 @@ unsigned long lastHallRawDebugMs = 0;
 // ================================
 enum MfcMenuItem : uint8_t {
     MFC_CLUTCH = 0,
-    MFC_BITE,
     MFC_CALIB,
     MFC_ENC_MODE,
+    MFC_RESET,
+    MFC_BITE,
     MFC_BRIGHT,
     MFC_PAGE,
     MFC_VOL_SYS,
     MFC_VOL_A,
     MFC_VOL_B,
     MFC_TC2,
-    MFC_TC3,
+    MFC_FFB,
     MFC_TYRE,
     MFC_ERS,
     MFC_FUEL,
-    MFC_RESET,
     MFC_COUNT
 };
 
 const char* mfcMenuNames[MFC_COUNT] = {
     "CLUTCH",
-    "BITE",
     "CALIB",
     "ENC MODE",
+    "RESET",
+    "BITE",
     "BRIGHT",
     "PAGE",
     "VOL_SYS",
     "VOL_A",
     "VOL_B",
     "TC2",
-    "TC3",
+    "FFB",
     "TYRE",
     "ERS",
-    "FUEL",
-    "RESET"
+    "FUEL"
 };
 
 int8_t mfcIndex = 0;
@@ -570,11 +580,11 @@ const char* ersModeNames[ERS_COUNT] = {
 };
 
 // Virtual buttons for MFC menu items (all IDs must be <= 64 to fit HID descriptor)
-// IDs 60-64: TC2/TC3/TYRE (CW/CCW pairs)
-// IDs 35-39: TYRE DN, VOL_A UP/DN, VOL_B UP/DN (remapped from 65-69 which exceeded 64-btn limit)
+// IDs 60-63: TC2 UP/DN (60/61), FFB UP/DN (62/63); 62/63 also used by SHIFT+TC2 = TC3 function
+// IDs 35-39, 64: TYRE UP/DN, VOL_A UP/DN, VOL_B UP/DN (remapped from 65-69 which exceeded limit)
 VirtualButtonPulse mfcVirtualButtons[10] = {
     {60, false, 0}, {61, false, 0}, // TC2 UP/DN
-    {62, false, 0}, {63, false, 0}, // TC3 UP/DN
+    {62, false, 0}, {63, false, 0}, // FFB UP/DN (shared: SHIFT+TC2 also fires 62/63)
     {64, false, 0}, {35, false, 0}, // TYRE UP / TYRE DN (35 was 65)
     {36, false, 0}, {37, false, 0}, // VOL_A UP/DN (36-37 were 66-67)
     {38, false, 0}, {39, false, 0}  // VOL_B UP/DN (38-39 were 68-69)
@@ -950,6 +960,14 @@ void handleEncoderButton(uint8_t idx, int8_t step) {
     uint8_t pulseIdxCW = localIndex * 2;
     uint8_t pulseIdxCCW = (localIndex * 2) + 1;
 
+    // SHIFT + ENC2-5 (idx 1-4): trigger alternate function buttons 25-28, 56-59
+    if (isButtonPressed(BUTTON_SHIFT) && idx >= 1 && idx <= 4) {
+        uint8_t shiftIdx = (idx - 1) * 2;
+        triggerPulse(step > 0 ? encoderShiftPulses[shiftIdx] : encoderShiftPulses[shiftIdx + 1]);
+        sendGamepad();
+        return;
+    }
+
     if (step > 0) {
         triggerPulse(encoderPulses[pulseIdxCW]);
     } else {
@@ -1016,10 +1034,10 @@ void handleMfcRotate(int8_t step) {
             triggerVirtualButton(step > 0 ? 38 : 39);
             sendGamepad();
         } else if (item == MFC_TC2) {
-            // Virtual buttons 60 (UP) / 61 (DN)
-            triggerVirtualButton(step > 0 ? 60 : 61);
+            // SHIFT+TC2 → TC3 function (62/63); plain → TC2 (60/61)
+            triggerVirtualButton(shiftPressed ? (step > 0 ? 62 : 63) : (step > 0 ? 60 : 61));
             sendGamepad();
-        } else if (item == MFC_TC3) {
+        } else if (item == MFC_FFB) {
             // Virtual buttons 62 (UP) / 63 (DN)
             triggerVirtualButton(step > 0 ? 62 : 63);
             sendGamepad();
@@ -1106,9 +1124,14 @@ void scanEncoders() {
                 if (encoderButtonMode) {
                     handleEncoderButton(i, step);
                 } else {
-                    // Direct axis output — no smoothing, no threshold, zero lag
-                    int8_t val = (int8_t)constrain(encoderStates[i].encoderValue, -127, 127);
-                    handleEncoderAxis(i, val);
+                    // AXIS mode: SHIFT + ENC2-5 fires virtual button instead of moving axis
+                    if (isButtonPressed(BUTTON_SHIFT) && i >= 1 && i <= 4) {
+                        handleEncoderButton(i, step);
+                    } else {
+                        // Direct axis output — no smoothing, no threshold, zero lag
+                        int8_t val = (int8_t)constrain(encoderStates[i].encoderValue, -127, 127);
+                        handleEncoderAxis(i, val);
+                    }
                 }
             }
         } else {
@@ -1134,6 +1157,15 @@ void releaseVirtualButtonPulses() {
 
     // Release MFC menu virtual buttons
     for (auto &pulse : mfcVirtualButtons) {
+        if (pulse.active && now >= pulse.releaseAt) {
+            buttons &= ~(1ULL << (pulse.id - 1));
+            pulse.active = false;
+            changed = true;
+        }
+    }
+
+    // Release SHIFT+encoder alternate function pulses (buttons 25-28, 56-59)
+    for (auto &pulse : encoderShiftPulses) {
         if (pulse.active && now >= pulse.releaseAt) {
             buttons &= ~(1ULL << (pulse.id - 1));
             pulse.active = false;
@@ -1221,26 +1253,38 @@ void updateClutches() {
         outA = avg;
         outB = avg;
     } else if (clutchCfg.mode == CLUTCH_BITE) {
-        // F1 Style - Assimétrico com Estado de Largada
+        // F1-style launch clutch
+        //  Both pressed fully  → anti-stall: output = 127 (fully disengaged)
+        //  One released        → held paddle maps 0-127 → 0-bite (fine control)
+        //  Both released       → output = 0 (fully engaged), exit launch mode
         static bool launchMode = false;
 
-        // Detecta modo largada: AMBAS acima de 95% (~120/127)
-        if (a > 120 && b > 120) {
+        int8_t minBite = (int8_t)((clutchCfg.bitePoint * 127) / 100);
+        int8_t lo = (a < b) ? a : b;  // less-pressed paddle
+        int8_t hi = (a > b) ? a : b;  // more-pressed paddle
+
+        // Enter: both paddles above 80% (~100/127)
+        if (a > 100 && b > 100) {
             launchMode = true;
         }
 
-        // Sai do modo largada: AMBAS abaixo de 5% (~6/127)
-        if (a < 6 && b < 6) {
-            launchMode = false;
-        }
-
-        int8_t combined = (a > b) ? a : b;  // MAX dos dois
-        int8_t minBite = (int8_t)((clutchCfg.bitePoint * 127) / 100);
-
-        // Modo largada: quando UMA é solta, REMAPEIA a outra de 0-100% para 0-bite%
-        if (launchMode && (a == 0 || b == 0)) {
-            // Remapeia: 100% da paddle → bite%, permitindo controle fino
-            combined = (int8_t)((combined * clutchCfg.bitePoint) / 100);
+        int8_t combined;
+        if (launchMode) {
+            if (hi < 10) {
+                // Both fully released — disengage launch mode
+                launchMode = false;
+                combined = 0;
+            } else if (lo < 20) {
+                // One paddle released (lo ≈ 0): hi paddle controls 0→bite range
+                // Threshold of 20 (~16%) avoids toggling on noise near zero
+                combined = (int8_t)(((int32_t)hi * minBite) / 127);
+            } else {
+                // Both still pressed: anti-stall, fully disengaged
+                combined = 127;
+            }
+        } else {
+            // Normal driving: use whichever paddle is more pressed
+            combined = hi;
         }
 
         outA = combined;
@@ -1264,6 +1308,13 @@ void updateClutches() {
     // Apply persistent channel swap (SHIFT+both-paddles combo toggles this)
     int8_t finalA = clutchChannelsSwapped ? outB : outA;
     int8_t finalB = clutchChannelsSwapped ? outA : outB;
+
+    // In non-DUAL modes both paddles contribute to a single combined clutch.
+    // Collapse to Z only (Rz = 0) for games that accept only one clutch axis.
+    if (clutchCfg.mode != CLUTCH_DUAL) {
+        finalA = (finalA > finalB) ? finalA : finalB;
+        finalB = 0;
+    }
 
     // Report only meaningful clutch changes to avoid noise spam on floating inputs
     if (abs(finalA - axisZ) >= CLUTCH_AXIS_DEADZONE || abs(finalB - axisRZ) >= CLUTCH_AXIS_DEADZONE) {
@@ -1360,9 +1411,6 @@ void handleMfcPress() {
             } else if (item == MFC_TC2) {
                 triggerVirtualButton(60);  // TC2 UP preset
                 sendGamepad();
-            } else if (item == MFC_TC3) {
-                triggerVirtualButton(62);  // TC3 UP preset
-                sendGamepad();
             } else if (item == MFC_TYRE) {
                 triggerVirtualButton(64);  // TYRE UP preset
                 sendGamepad();
@@ -1385,7 +1433,7 @@ void handleMfcPress() {
         // Toggle adjust mode for certain items
         if (item == MFC_BITE || item == MFC_BRIGHT || item == MFC_PAGE ||
             item == MFC_VOL_SYS || item == MFC_VOL_A || item == MFC_VOL_B ||
-            item == MFC_TC2 || item == MFC_TC3 || item == MFC_TYRE ||
+            item == MFC_TC2 || item == MFC_FFB || item == MFC_TYRE ||
             item == MFC_FUEL) {
 
             mfcAdjustMode = !mfcAdjustMode;
@@ -1407,8 +1455,8 @@ void handleMfcPress() {
                     uartSend("MFC", "ADJUST", "VOL_B");
                 } else if (item == MFC_TC2) {
                     uartSend("MFC", "ADJUST", "TC2");
-                } else if (item == MFC_TC3) {
-                    uartSend("MFC", "ADJUST", "TC3");
+                } else if (item == MFC_FFB) {
+                    uartSend("MFC", "ADJUST", "FFB");
                 } else if (item == MFC_TYRE) {
                     uartSend("MFC", "ADJUST", "TYRE");
                 } else if (item == MFC_FUEL) {

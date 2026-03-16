@@ -284,7 +284,7 @@
            id="tspan28">12</tspan><tspan
            x="0"
            dy="16"
-           id="tspan29">TC 3</tspan></text></g><g
+           id="tspan29">FFB</tspan></text></g><g
        transform="matrix(0.05407797,-0.16643489,0.16643489,0.05407797,125.82478,-1632.9415)"
        id="g31"><path
          id="use29"
@@ -553,7 +553,7 @@
              id="tspan28-8">12</tspan><tspan
              x="0"
              dy="16"
-             id="tspan29-8">TC 3</tspan></text></g><g
+             id="tspan29-8">FFB</tspan></text></g><g
          transform="rotate(-72)"
          id="g31-3"><use
            href="#slice"
@@ -831,7 +831,7 @@
            id="tspan28-2">12</tspan><tspan
            x="0"
            dy="16"
-           id="tspan29-43">TC 3</tspan></text></g><g
+           id="tspan29-43">FFB</tspan></text></g><g
        transform="rotate(-72)"
        id="g31-39"><use
          href="#slice-8"
@@ -1153,7 +1153,7 @@
            id="tspan28-3">12</tspan><tspan
            x="0"
            dy="16"
-           id="tspan29-9">TC 3</tspan></text></g><g
+           id="tspan29-9">FFB</tspan></text></g><g
        transform="rotate(-72)"
        id="g31-0"><use
          href="#slice-18"
