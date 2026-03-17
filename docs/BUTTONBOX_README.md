@@ -220,6 +220,7 @@ Para verificar tudo: https://gamepad-tester.com ou **SimHub → Controles → In
 |-----|----------|
 | [MANUAL_BUTTONBOX.md](MANUAL_BUTTONBOX.md) | Manual completo com combos e atalhos |
 | [MFC_MENU_IMPLEMENTATION.md](MFC_MENU_IMPLEMENTATION.md) | Implementação detalhada do menu MFC |
+| [ESQUEMA_ELETRICO_VOLANTE_COMPLETO.md](ESQUEMA_ELETRICO_VOLANTE_COMPLETO.md) | Esquema elétrico completo (ESP32-S3, WT32, UART, I2C, USB hub) |
 | [PINMAP_SOLDERING_GUIDE.md](PINMAP_SOLDERING_GUIDE.md) | Guia de soldagem passo a passo |
 | [MCP23017_MATRIZ_8x8.md](MCP23017_MATRIZ_8x8.md) | Detalhes da matriz 8x8 via I2C |
 | [COMO_CONFIGURAR_SIMHUB.md](COMO_CONFIGURAR_SIMHUB.md) | Configuração do SimHub (dashboard + wheel) |

@@ -1,36 +1,69 @@
 # ESP-SimHub ESP32-S3 Display Dashboard
 
+[Portuguese version (PT-BR)](README.pt-BR.md)
+[Documentation index](docs/README.md)
+
 A custom SimHub firmware for ESP32-S3 with TFT display support, specifically designed for the **WT32-SC01 Plus** development board. This firmware displays real-time racing telemetry data from SimHub on a 3.2" 480x320 landscape display.
 
 ## 📋 Overview
 
 This project is a fork of [ESP-SimHub](https://github.com/eCrowneEng/ESP-SimHub) firmware, customized to work with ESP32-S3 boards featuring TFT displays. It provides a complete racing dashboard solution that connects to SimHub via USB serial communication.
 
-### Features
+## 📌 Project Lineage and Attribution
 
-- ✅ **Real-time telemetry display** - Speed, RPM, gear, lap times, tire pressure, TC/ABS levels
-- ✅ **Custom loading screen** - Display your logo during initialization
-- ✅ **8-bit parallel display interface** - Optimized for WT32-SC01 Plus ST7796 display
-- ✅ **NeoPixel/WS2812B LED support** - Optional RGB LED strips for RPM and flag indicators
-- ✅ **USB-Serial/JTAG communication** - Works out of the box on Windows without special drivers
-- ✅ **Landscape orientation** - 480x320 display optimized for racing dashboards
+To make authorship and scope explicit:
 
-## 🎯 Supported Hardware
+### Work inherited from the original ESP-SimHub repository (eCrowneEng)
 
-### Primary Target Device
+- Core SimHub communication model and command flow used by this firmware baseline
+- Foundational serial protocol concepts used in ESP-SimHub ecosystem
+- General project concept and compatibility approach for SimHub integration
 
-**WT32-SC01 Plus** - ESP32-S3 development board with integrated 3.2" TFT display
-- **Display**: ST7796 controller, 320x480 portrait / 480x320 landscape
-- **Interface**: 8-bit MCU (8080) parallel interface
-- **MCU**: ESP32-S3 with 2MB PSRAM
-- **Communication**: USB-Serial/JTAG (native, no drivers needed on Windows)
+### Work added in this fork (Orlando Eduardo Pereira)
 
-### Display Specifications
+- ESP32-S3 and WT32-SC01 Plus focused implementation and hardware adaptation
+- 8-bit parallel ST7796 display integration and board-specific pin mapping
+- Dashboard rendering updates, custom protocol extensions, and UI refinements
+- Wheel integration work (UART interaction, button box and telemetry interaction flow)
+- NeoPixel and front LED behavior enhancements for sim racing use cases
+- Wiring, soldering, troubleshooting, and setup documentation for this hardware stack
+- Ongoing maintenance, debugging fixes, and platform-specific improvements
 
-- **Resolution**: 480x320 pixels (landscape mode)
-- **Controller**: ST7796
-- **Interface**: 8-bit parallel (8080 MCU mode)
-- **Backlight**: PWM controlled (GPIO 45)
+If you use this fork, please keep both credits: the original ESP-SimHub project and this fork's implementation work.
+
+## 🎯 Firmware Targets
+
+This repository currently contains two active firmware targets:
+
+### 1) Display Firmware (WT32-SC01 Plus)
+
+- Source entrypoint: `src/main.cpp`
+- PlatformIO env: `wt32-sc01-plus`
+- Main role: render dashboard and receive SimHub custom protocol over USB serial
+- Hardware: WT32-SC01 Plus (ST7796, 8-bit parallel)
+
+### 2) Wheel Firmware (ESP32-S3 WROOM1)
+
+- Source entrypoint: `src/main_wheel.cpp`
+- PlatformIO env: `wroom1-n8r8-wheel`
+- Main role: USB HID gamepad + matrix/encoders/hall sensors + UART integration with display
+- Hardware: ESP32-S3 WROOM1 N8R8 + MCP23017 + PCA9685 + wheel controls
+
+## ✅ Key Features
+
+### Display Firmware
+
+- Real-time telemetry dashboard (speed, RPM, gear, lap data, tire pressure, TC/ABS)
+- 8-bit parallel ST7796 display pipeline for WT32-SC01 Plus
+- Custom loading screen/logo support
+- Optional NeoPixel/WS2812 indicators
+
+### Wheel Firmware
+
+- USB HID gamepad (buttons, axes, HAT) for games/SimHub controls
+- Matrix scanning via MCP23017 and front LED effects via PCA9685
+- Hall sensor clutch modes and calibration flow
+- UART data exchange with WT32 display firmware
 
 ## 🚀 Quick Start
 
@@ -60,11 +93,14 @@ This project is a fork of [ESP-SimHub](https://github.com/eCrowneEng/ESP-SimHub)
    ```
    Place your logo PNG file in `img/logo.png` before running this command.
 
-4. **Build and upload**
+4. **Build and upload Display Firmware**
    ```bash
-   ./upload-mac.sh    # On macOS
-   # Or use PlatformIO directly:
    pio run -e wt32-sc01-plus -t upload
+   ```
+
+5. **Build and upload Wheel Firmware**
+   ```bash
+   pio run -e wroom1-n8r8-wheel -t upload
    ```
 
 ### SimHub Configuration
@@ -84,7 +120,7 @@ The custom protocol sends 22 data fields including:
 - Brake bias and brake level
 - Lap invalidation status
 
-## 📊 Dashboard Layout
+## 📊 Dashboard Layout (Display Firmware)
 
 The dashboard displays information in a 5x5 grid layout:
 
@@ -111,33 +147,44 @@ The dashboard displays information in a 5x5 grid layout:
 
 ## 🛠️ Development
 
-### Project Structure
+### Project Structure (high-level)
 
 ```
 ESP-SimHub-ESP32S3-SCREEN/
 ├── src/
-│   ├── main.cpp              # Main firmware code
+│   ├── main.cpp              # Display firmware entrypoint (WT32)
+│   ├── main_wheel.cpp        # Wheel firmware entrypoint (ESP32-S3 WROOM1)
 │   ├── SHCustomProtocol.h    # Display and dashboard logic
 │   ├── SHCommands.h          # SimHub command handlers
 │   ├── NeoPixelBusLEDs.h     # RGB LED support
 │   ├── logo_image.h          # Generated logo array (from convert_logo.py)
 │   └── GFXHelpers.h          # Graphics helper functions
+├── docs/
+│   └── README.md             # Documentation index
 ├── img/
 │   └── logo.png              # Your custom logo (PNG with transparency)
+├── scripts/
+│   ├── upload-mac.sh         # macOS helper scripts
+│   └── ...
 ├── platformio.ini            # PlatformIO configuration
 ├── convert_logo.py           # Logo conversion script
-├── upload-mac.sh             # Build and upload script for macOS
 └── customProtocol-dashBoard.txt  # SimHub custom protocol
 ```
 
 ### Building
 
 ```bash
-# Build only
+# Build display firmware only
 pio run -e wt32-sc01-plus
 
-# Build and upload
+# Build wheel firmware only
+pio run -e wroom1-n8r8-wheel
+
+# Upload display firmware
 pio run -e wt32-sc01-plus -t upload
+
+# Upload wheel firmware
+pio run -e wroom1-n8r8-wheel -t upload
 
 # Monitor serial output
 pio device monitor
@@ -145,11 +192,13 @@ pio device monitor
 
 ### Configuration
 
-Key configuration options in `src/main.cpp`:
+Display firmware options in `src/main.cpp`:
 
 - `PIXEL_WIDTH` / `PIXEL_HEIGHT`: Display resolution (480x320 for landscape)
 - `INCLUDE_WIFI`: Enable WiFi bridge (default: false)
 - `INCLUDE_RGB_LEDS_NEOPIXELBUS`: Enable NeoPixel LED support
+
+Wheel firmware options are mainly in `src/main_wheel.cpp` and `platformio.ini` (`wroom1-n8r8-wheel` env).
 
 ### Logo Customization
 
@@ -241,6 +290,20 @@ For issues and questions:
 - Open an issue on GitHub
 - Join the SimHub Discord server
 - Check the troubleshooting section above
+
+## ☕ Support This Fork
+
+If this fork saved you time or helped your build, you can support my work:
+
+- PicPay: **@orlandoeduardo.pereira**
+- Link: https://picpay.me/orlandoeduardo.pereira
+- Link (PicPay): https://link.picpay.com/p/177377918669b9b8f2b4e25
+
+PIX QR Code:
+
+QR image path: `docs/img/pix.png`
+
+![PicPay PIX QR Code](docs/img/pix.png)
 
 ---
 
