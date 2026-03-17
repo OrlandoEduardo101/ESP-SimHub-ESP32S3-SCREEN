@@ -45,6 +45,7 @@ FullLoopbackStream incomingStream;
 #endif
 
 #include <SHCustomProtocol.h>
+#include <Buzzer.h>
 
 SHCustomProtocol shCustomProtocol;
 char loop_opt;
@@ -113,6 +114,9 @@ void setup(void)
 	// Configure GPIO0 with strong pull-up to prevent entering download mode
 	// This is critical for WT32-SC01 Plus when SimHub opens the serial port
 	pinMode(0, INPUT_PULLUP);
+
+	// Initialize buzzer (GPIO 11, EXT_IO2) — active buzzer via NPN transistor
+	buzzerInit();
 
 	// Small delay to stabilize GPIO0 before USB CDC initialization
 	delay(100);
@@ -202,6 +206,9 @@ void setup(void)
 	screenLog("LEDs init OK");
 	#endif
 
+	// Boot beep — confirms the buzzer is wired and firmware is running
+	buzzerBeep(100);
+
 	Serial.println(">>> Setup complete!");
 	debugLog(">>> Setup complete!");
 	Serial.println("========================================\n");
@@ -211,6 +218,8 @@ void setup(void)
 void loop()
 {
   static bool waitingLogged = false;
+
+  buzzerUpdate(); // Non-blocking buzzer timeout handler
 
   if (!waitingLogged && millis() > 500) {
     screenLog("Aguardando SimHub...");
@@ -342,6 +351,7 @@ void processButtonBoxLine(const String &line) {
 	} else if (cat == "MFC" && func == "ADJUST") {
 		msg = String("ADJUST: ") + val;
 	} else if (cat == "MFC" && func == "CONFIRM") {
+		buzzerBeep(60); // Feedback de confirmação do menu MFC
 		// Legacy compatibility
 		if (val == "PAGE_NEXT") {
 			shCustomProtocol.pageNextExternal();

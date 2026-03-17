@@ -23,6 +23,7 @@ uint8_t neoPixelBusGetLuminance();
 // IMPORTANT: WT32-SC01 Plus uses 8-bit parallel interface, NOT SPI!
 // Pinout according to official WT32-SC01 Plus documentation:
 // https://github.com/Cesarbautista10/WT32-SC01-Plus-ESP32
+#include <Buzzer.h>
 #if 1  // Always use ST7796 for WT32-SC01 Plus
 // LCD Interface pins (8-bit MCU 8080)
 #define TFT_BL 45    // BL_PWM - Backlight control (active high)
@@ -193,6 +194,8 @@ private:
 	String drsActive = "0";          // [59] DRS ativo (0/1)
 	String kersLevel = "0";          // [60] Bateria KERS (0-100%)
 	String turboBoost = "0.0";       // [61] Pressão turbo (Bar)
+
+	String prevDrsAvailable = "0";   // DRS edge detection for buzzer
 
 	int cellTitleHeight = 0;
 	bool hasReceivedData = false;
@@ -375,10 +378,12 @@ public:
 	}
 
 	void pageNextExternal() {
+		buzzerBeep(80);
 		nextPage();
 	}
 
 	void pagePrevExternal() {
+		buzzerBeep(80);
 		prevPage();
 	}
 
@@ -773,6 +778,12 @@ public:
 			resetDrawCache();
 			lastPage = currentPage;
 		}
+
+		// DRS rising-edge detection: beep once when DRS becomes available
+		if (prevDrsAvailable == "0" && drsAvailable == "1") {
+			buzzerBeep(150);
+		}
+		prevDrsAvailable = drsAvailable;
 
 		if (!hasReceivedData) {
 			// Show loading animation on LEDs while waiting for SimHub

@@ -38,12 +38,31 @@ Refer to the pinout diagram below for easy reference to all available pins on th
 |------|-------------|------------|---------------|------------------------------|
 | 1    | +5V         | -          | 5V ±5%        | Power supply or output voltage |
 | 2    | GND         | -          | 0V            | Ground                       |
-| 3    | EXT_IO1     | GPIO 10    | 0-3.3V        | Extended IO                  |
-| 4    | EXT_IO2     | GPIO 11    | 0-3.3V        |                              |
-| 5    | EXT_IO3     | GPIO 12    | 0-3.3V        |                              |
-| 6    | EXT_IO4     | GPIO 13    | 0-3.3V        |                              |
-| 7    | EXT_IO5     | GPIO 14    | 0-3.3V        |                              |
-| 8    | EXT_IO6     | GPIO 21    | 0-3.3V        |                              |
+| 3    | EXT_IO1     | GPIO 10    | 0-3.3V        | **Em uso:** LED strip WS2812B (NeoPixelBus) |
+| 4    | EXT_IO2     | GPIO 11    | 0-3.3V        | **Em uso:** Buzzer ativo 5V (via transistor NPN) |
+| 5    | EXT_IO3     | GPIO 12    | 0-3.3V        | Livre                        |
+| 6    | EXT_IO4     | GPIO 13    | 0-3.3V        | Livre                        |
+| 7    | EXT_IO5     | GPIO 14    | 0-3.3V        | Livre                        |
+| 8    | EXT_IO6     | GPIO 21    | 0-3.3V        | Livre                        |
+
+#### Ligação do Buzzer Ativo 5V (GPIO 11)
+
+```
+Extended IO Connector
+  Pin 1 (+5V) ─────────────────────┐
+  Pin 2 (GND) ──────────┐          │
+  Pin 4 (GPIO 11) ──[1kΩ]──► Base NPN (BC547 / 2N2222 / S8050)
+                                   Coletor ──► Buzzer (−)
+                                   Buzzer (+) ──── +5V (Pin 1)
+                                   Emissor ──────── GND (Pin 2)
+```
+
+| Evento firmware         | Duração do bipe |
+|-------------------------|-----------------|
+| Boot do sistema         | 100 ms          |
+| Troca de página         | 80 ms           |
+| Confirmação MFC         | 60 ms           |
+| DRS disponível (0 → 1)  | 150 ms          |
 
 ### 3. Speaker Interface
 
@@ -51,7 +70,9 @@ Refer to the pinout diagram below for easy reference to all available pins on th
 |-----|-------------------|--------------------|
 | 1   | SPK+             | Speaker positive   |
 | 2   | SPK-             | Speaker negative   |
-
+> **Nota:** Os pinos SPK+/SPK- são saída diferencial BTL do amplificador **NS4168** (I2S). Ambos os pinos oscilam em fase oposta — **não é possível conectar um buzzer ativo diretamente aqui**.
+>
+> **Buzzer ativo 5V:** Usar GPIO 11 (EXT_IO2) com transistor NPN. Ver seção Extended IO abaixo.
 ### 4. SD Card Interface
 
 | Description     | Module Pin | Remark                   |
