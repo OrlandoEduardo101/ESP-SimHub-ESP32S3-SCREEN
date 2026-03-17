@@ -754,21 +754,21 @@ public:
 			if (touch.touched && (millis() - lastTouchTime) > TOUCH_DEBOUNCE_MS) {
 				lastTouchTime = millis();
 
-				// Left half = previous page, Right half = next page
-				if (touch.x < SCREEN_WIDTH / 2) {
-					// Previous page (left swipe)
-					currentPage = (DashboardPage)((currentPage - 1 + 6) % 6);
-					gfx->fillScreen(BLACK);  // Clear screen for new page
-				} else {
-					// Next page (right swipe)
-					currentPage = (DashboardPage)((currentPage + 1) % 6);
-					gfx->fillScreen(BLACK);  // Clear screen for new page
-				}
+				// Display is landscape (rotation=1). The FT6336U reports in portrait coordinates:
+				//   touch.x = portrait X axis → maps to display Y (0-319)
+				//   touch.y = portrait Y axis → maps to display X (0-479)
+				// So left/right split must use touch.y, not touch.x.
+				Serial.printf("[TOUCH] x=%d y=%d (display_x≈touch.y, threshold=%d)\n",
+					touch.x, touch.y, SCREEN_WIDTH / 2);
 
-				// Reset draw cache when page changes to force complete redraw
-				if (currentPage != lastPage) {
-					resetDrawCache();
-					lastPage = currentPage;
+				if (touch.y < SCREEN_WIDTH / 2) {
+					// Left half of display → previous page
+					pagePrevExternal();  // includes buzzer + correct % 7 modulo
+					gfx->fillScreen(BLACK);
+				} else {
+					// Right half of display → next page
+					pageNextExternal();  // includes buzzer + correct % 7 modulo
+					gfx->fillScreen(BLACK);
 				}
 			}
 		}
