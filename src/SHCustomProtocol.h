@@ -48,7 +48,9 @@ uint8_t neoPixelBusGetLuminance();
 // IMPORTANT: Objects created as pointers and initialized in setup() to avoid initialization issues
 // Creating them in setup() instead of globally prevents "no free i80 bus slot" error
 Arduino_DataBus *bus = nullptr;
-Arduino_ST7796 *gfx = nullptr;
+Arduino_ST7796 *tft = nullptr;    // Hardware display (init in setup)
+Arduino_Canvas *canvas = nullptr;  // Optional PSRAM framebuffer
+Arduino_GFX *gfx = nullptr;       // Drawing target (canvas if PSRAM, else tft)
 
 // Touch screen configuration for WT32-SC01 Plus (FT6336U capacitive touch)
 // According to: https://github.com/Cesarbautista10/WT32-SC01-Plus-ESP32
@@ -142,7 +144,7 @@ private:
 	String tcActive = "0";
 	String absLevel = "0";
 	String absActive = "0";
-	String isTCCutNull = "0";
+	String tcCut = "0";
 	String brakeBias = "0";
 	String brake = "0";
 	String lapInvalidated = "False";
@@ -195,6 +197,26 @@ private:
 	String kersLevel = "0";          // [60] Bateria KERS (0-100%)
 	String turboBoost = "0.0";       // [61] Pressão turbo (Bar)
 
+	// Bloco 9: Dados 499P (índices 62-67)
+	String ersDeployMode = "None";   // [62] ERS Deploy Mode
+	String arbFront = "--";          // [63] ARB Front
+	String arbRear = "--";           // [64] ARB Rear
+	String brkMigration = "--";      // [65] Brake Migration
+	String headWind = "0";           // [66] Wind Speed
+	String rearBrakeBias = "0.0";    // [67] Rear Brake Bias
+
+	// Temperatura pneus (índices 15-18) - promoted from local vars
+	String tyreTemperatureFrontLeft = "0";
+	String tyreTemperatureFrontRight = "0";
+	String tyreTemperatureRearLeft = "0";
+	String tyreTemperatureRearRight = "0";
+
+	// Temperatura freios (índices 19-22) - promoted from local vars
+	String brakeTemperatureFrontLeft = "0";
+	String brakeTemperatureFrontRight = "0";
+	String brakeTemperatureRearLeft = "0";
+	String brakeTemperatureRearRight = "0";
+
 	String prevDrsAvailable = "0";   // DRS edge detection for buzzer
 
 	int cellTitleHeight = 0;
@@ -217,10 +239,11 @@ private:
 		PAGE_RACE = 0,
 		PAGE_TIMING = 1,
 		PAGE_TELEMETRY = 2,
-		PAGE_ADVANCED = 3,       // NEW: Advanced telemetry (Motor, Wear, Env, DRS, KERS, Turbo)
-		PAGE_RELATIVE = 4,       // NEW: Relative/Head-to-head
-		PAGE_LAPS = 5,           // NEW: Laps/Sectors analysis
-		PAGE_LEADERBOARD = 6     // NEW: Leaderboard (placeholder)
+		PAGE_ADVANCED = 3,       // Advanced telemetry (Motor, Wear, Env, DRS, KERS, Turbo)
+		PAGE_RELATIVE = 4,       // Relative/Head-to-head
+		PAGE_LAPS = 5,           // Laps/Sectors analysis
+		PAGE_LEADERBOARD = 6,    // Leaderboard (placeholder)
+		PAGE_499P = 7            // Ferrari 499P dashboard
 	};
 	DashboardPage currentPage = PAGE_RACE;
 	DashboardPage lastPage = PAGE_RACE;  // Track previous page to detect page changes
@@ -258,14 +281,14 @@ private:
 
 	// Navigate to next page
 	void nextPage() {
-		currentPage = (DashboardPage)((currentPage + 1) % 7);
+		currentPage = (DashboardPage)((currentPage + 1) % 8);
 		gfx->fillScreen(BLACK);
 		resetDrawCache();
 	}
 
 	// Navigate to previous page
 	void prevPage() {
-		currentPage = (DashboardPage)((currentPage - 1 + 7) % 7);
+		currentPage = (DashboardPage)((currentPage - 1 + 8) % 8);
 		gfx->fillScreen(BLACK);
 		resetDrawCache();
 	}
@@ -444,7 +467,7 @@ public:
 			if (gfx == nullptr && bus != nullptr) {
 				Serial.println("Creating ST7796 display object...");
 				// Rotation: 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
-				gfx = new Arduino_ST7796(bus, TFT_RST, 1 /* rotation = landscape */, true /* IPS */);
+				tft = new Arduino_ST7796(bus, TFT_RST, 1 /* rotation = landscape */, true /* IPS */);
 			}
 
 			// Initialize backlight first - GPIO 45 according to WT32-SC01 Plus documentation
@@ -462,7 +485,7 @@ public:
 		#endif
 
 			// Initialize display with error handling
-			if (gfx != nullptr && bus != nullptr) {
+			if (tft != nullptr && bus != nullptr) {
 				Serial.println("Initializing display (8-bit parallel interface)...");
 				Serial.flush();
 
@@ -482,7 +505,7 @@ public:
 				Serial.flush();
 
 				// Initialize display
-				bool displayOk = gfx->begin();
+				bool displayOk = tft->begin();
 				if (!displayOk) {
 					Serial.println("ERROR: Failed to initialize display!");
 					displayEnabled = false;
@@ -492,6 +515,29 @@ public:
 				Serial.flush();
 
 				delay(300);  // Give display time to stabilize
+
+				// Try to create canvas framebuffer in PSRAM for double-buffering
+				#ifdef BOARD_HAS_PSRAM
+				if (psramFound()) {
+					Serial.printf("PSRAM found: %d bytes free\n", ESP.getFreePsram());
+					canvas = new Arduino_Canvas(tft->width(), tft->height(), tft);
+					if (canvas->begin()) {
+						gfx = canvas;
+						Serial.println("Canvas framebuffer created in PSRAM (double-buffering enabled)");
+					} else {
+						delete canvas;
+						canvas = nullptr;
+						gfx = tft;
+						Serial.println("Canvas creation failed, using direct rendering");
+					}
+				} else {
+					gfx = tft;
+					Serial.println("No PSRAM available, using direct rendering");
+				}
+				#else
+				gfx = tft;
+				Serial.println("PSRAM not enabled, using direct rendering");
+				#endif
 
 				// Turn on backlight after display is ready
 		#ifdef TFT_BL
@@ -662,15 +708,15 @@ public:
 		tyrePressureRearLeft = FlowSerialReadStringUntil(';');
 		tyrePressureRearRight = FlowSerialReadStringUntil(';');
 		// Temperatura dos pneus
-		String tyreTemperatureFrontLeft = FlowSerialReadStringUntil(';');
-		String tyreTemperatureFrontRight = FlowSerialReadStringUntil(';');
-		String tyreTemperatureRearLeft = FlowSerialReadStringUntil(';');
-		String tyreTemperatureRearRight = FlowSerialReadStringUntil(';');
+		tyreTemperatureFrontLeft = FlowSerialReadStringUntil(';');
+		tyreTemperatureFrontRight = FlowSerialReadStringUntil(';');
+		tyreTemperatureRearLeft = FlowSerialReadStringUntil(';');
+		tyreTemperatureRearRight = FlowSerialReadStringUntil(';');
 		// Temperatura dos freios
-		String brakeTemperatureFrontLeft = FlowSerialReadStringUntil(';');
-		String brakeTemperatureFrontRight = FlowSerialReadStringUntil(';');
-		String brakeTemperatureRearLeft = FlowSerialReadStringUntil(';');
-		String brakeTemperatureRearRight = FlowSerialReadStringUntil(';');
+		brakeTemperatureFrontLeft = FlowSerialReadStringUntil(';');
+		brakeTemperatureFrontRight = FlowSerialReadStringUntil(';');
+		brakeTemperatureRearLeft = FlowSerialReadStringUntil(';');
+		brakeTemperatureRearRight = FlowSerialReadStringUntil(';');
 		// Motor
 		oilTemperature = FlowSerialReadStringUntil(';');
 		waterTemperature = FlowSerialReadStringUntil(';');
@@ -680,7 +726,7 @@ public:
 		tcActive = FlowSerialReadStringUntil(';');
 		absLevel = FlowSerialReadStringUntil(';');
 		absActive = FlowSerialReadStringUntil(';');
-		isTCCutNull = FlowSerialReadStringUntil(';');  // [29] TCCut (0 or 1)
+		tcCut = FlowSerialReadStringUntil(';');  // [29] TCCut (ex: 0-12 in ACC)
 		brakeBias = FlowSerialReadStringUntil(';');    // [30] BrakeBias (e.g., 68.0)
 		brake = FlowSerialReadStringUntil(';');        // [31] Brake pedal (0-100)
 
@@ -723,7 +769,15 @@ public:
 		drsAvailable = FlowSerialReadStringUntil(';');
 		drsActive = FlowSerialReadStringUntil(';');
 		kersLevel = FlowSerialReadStringUntil(';');
-		turboBoost = FlowSerialReadStringUntil(';');  // Último campo (índice 61)
+		turboBoost = FlowSerialReadStringUntil(';');  // [61]
+
+		// BLOCO 9: Dados 499P (índices 62-67)
+		ersDeployMode = FlowSerialReadStringUntil(';');
+		arbFront = FlowSerialReadStringUntil(';');
+		arbRear = FlowSerialReadStringUntil(';');
+		brkMigration = FlowSerialReadStringUntil(';');
+		headWind = FlowSerialReadStringUntil(';');
+		rearBrakeBias = FlowSerialReadStringUntil(';');  // Último campo (índice 67)
 
 		// Validate brakeBias (should be between 0-100)
 		brakeBias.trim();
@@ -763,12 +817,10 @@ public:
 
 				if (touch.y < SCREEN_WIDTH / 2) {
 					// Left half of display → previous page
-					pagePrevExternal();  // includes buzzer + correct % 7 modulo
-					gfx->fillScreen(BLACK);
+					pagePrevExternal();  // includes buzzer + fillScreen + resetDrawCache
 				} else {
 					// Right half of display → next page
-					pageNextExternal();  // includes buzzer + correct % 7 modulo
-					gfx->fillScreen(BLACK);
+					pageNextExternal();  // includes buzzer + fillScreen + resetDrawCache
 				}
 			}
 		}
@@ -823,6 +875,9 @@ public:
 			case PAGE_LEADERBOARD:
 				drawLeaderboardPageContent();
 				break;
+			case PAGE_499P:
+				draw499PPageContent();
+				break;
 		}
 
 		// Draw alerts (flags, penalties, etc.) on top of everything
@@ -847,18 +902,21 @@ public:
 			absActive
 		);
 		#endif
+
+		// Flush canvas to display (double-buffered rendering)
+		if (canvas) canvas->flush();
 	}
 
 	void drawPageIndicator() {
-		// Draw small page indicator dots at bottom center (7 pages)
+		// Draw small page indicator dots at bottom center (8 pages)
 		// Positioned in dedicated padding area at bottom
 		int dotRadius = 2;
 		int dotSpacing = 8;
-		int totalWidth = (7 - 1) * dotSpacing + (dotRadius * 2);
+		int totalWidth = (8 - 1) * dotSpacing + (dotRadius * 2);
 		int startX = (SCREEN_WIDTH - totalWidth) / 2;  // Center horizontally
 		int startY = SCREEN_HEIGHT + 41;  // 8px from bottom margin (colado na borda)
 
-		for (int i = 0; i < 7; i++) {
+		for (int i = 0; i < 8; i++) {
 			uint16_t color = (i == currentPage) ? WHITE : RGB565(100, 100, 100);
 			gfx->fillCircle(startX + (i * dotSpacing), startY, dotRadius, color);
 		}
@@ -997,7 +1055,7 @@ public:
 
 		// Bottom row (TC, ABS, BB)
 		// If TCCut is active (non-zero), show CUT indicator; otherwise show TC level
-		if (isTCCutNull != "0") {
+		if (tcCut != "0") {
 			drawCell(COL[0], ROW[4], String("CUT"), "tcCut", "TC", "center", YELLOW);
 		} else {
 			drawCell(COL[0], ROW[4], tcLevel, "tcLevel", "TC", "center", YELLOW);
@@ -1553,6 +1611,288 @@ public:
 	}
 
 	void idle() {
+	}
+
+	// ============================================================
+	// PAGE_499P: Ferrari 499P-inspired dashboard
+	// Layout: 480×272 (content area)
+	// ============================================================
+	void draw499PPageContent() {
+		if (!canUseDisplay()) return;
+
+		// Layout constants
+		const int W = SCREEN_WIDTH;   // 480
+		const int H = SCREEN_HEIGHT;  // 272
+		const int TOP_BAR_H = 30;
+		const int BOT_BAR_H = 28;
+		const int BOT_BAR_Y = H - BOT_BAR_H;  // 244
+		const int MID_Y = TOP_BAR_H;
+		const int MID_H = BOT_BAR_Y - MID_Y;  // 214
+
+		// Colors (Ferrari 499P dark theme)
+		const uint16_t BG_DARK   = RGB565(10, 10, 10);
+		const uint16_t BG_HEADER = RGB565(25, 25, 30);
+		const uint16_t BG_BOTTOM = RGB565(20, 20, 25);
+		const uint16_t LABEL_CLR = RGB565(140, 140, 140);
+		const uint16_t VALUE_CLR = WHITE;
+		const uint16_t ACCENT_RED = RGB565(220, 30, 30);
+		const uint16_t ACCENT_GRN = RGB565(0, 200, 80);
+		const uint16_t TYRE_CLR  = CYAN;
+
+		// Column layout: TC1(50) | Left(120) | Center(140) | Right(120) | TC2(50)
+		const int TC_W = 50;
+		const int COL_L_X = TC_W;
+		const int COL_L_W = 120;
+		const int COL_C_X = COL_L_X + COL_L_W;
+		const int COL_C_W = 140;
+		const int COL_R_X = COL_C_X + COL_C_W;
+		const int COL_R_W = 120;
+		const int TC2_X = W - TC_W;
+
+		// ─── TOP BAR: LAPTIME | DELTA | FUEL ───
+		gfx->fillRect(0, 0, W, TOP_BAR_H, BG_HEADER);
+
+		// Laptime (left)
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(4, 3);
+		gfx->print("LAP");
+		gfx->setTextSize(2);
+		gfx->setTextColor(VALUE_CLR);
+		gfx->setCursor(30, 7);
+		gfx->print(currentLapTime);
+
+		// Delta (center)
+		float deltaVal = sessionBestLiveDeltaSeconds.toFloat();
+		uint16_t deltaColor = (deltaVal < 0) ? ACCENT_GRN : ACCENT_RED;
+		gfx->setTextSize(2);
+		gfx->setTextColor(deltaColor);
+		int16_t dx1, dy1; uint16_t dw, dh;
+		gfx->getTextBounds(sessionBestLiveDeltaSeconds, 0, 0, &dx1, &dy1, &dw, &dh);
+		gfx->setCursor((W - dw) / 2, 7);
+		gfx->print(sessionBestLiveDeltaSeconds);
+
+		// Fuel remaining (right)
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(W - 120, 3);
+		gfx->print("FUEL");
+		gfx->setTextSize(2);
+		float fuelVal = fuelRemainingLaps.toFloat();
+		gfx->setTextColor(fuelVal < 3.0f ? ACCENT_RED : VALUE_CLR);
+		gfx->setCursor(W - 90, 7);
+		gfx->print(fuelRemainingLaps);
+
+		// ─── MIDDLE SECTION background ───
+		gfx->fillRect(0, MID_Y, W, MID_H, BG_DARK);
+
+		// ─── TC1 (left edge) ───
+		gfx->fillRect(0, MID_Y, TC_W, MID_H, RGB565(35, 8, 8));
+		gfx->drawRect(0, MID_Y, TC_W, MID_H, RGB565(80, 30, 30));
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(6, MID_Y + 5);
+		gfx->print("TC 1");
+		gfx->setTextSize(4);
+		gfx->setTextColor(ACCENT_RED);
+		gfx->setCursor(10, MID_Y + 22);
+		gfx->print(tcLevel);
+
+		// ─── TC2 (right edge) ───
+		gfx->fillRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(35, 8, 8));
+		gfx->drawRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(80, 30, 30));
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(TC2_X + 6, MID_Y + 5);
+		gfx->print("TC 2");
+		gfx->setTextSize(4);
+		gfx->setTextColor(ACCENT_RED);
+		gfx->setCursor(TC2_X + 10, MID_Y + 22);
+		gfx->print(tcCut);
+
+		// ─── SPEED (left column, upper) ───
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_L_X + 5, MID_Y + 5);
+		gfx->print("SPEED");
+		gfx->setTextSize(4);
+		gfx->setTextColor(VALUE_CLR);
+		// Center speed
+		gfx->getTextBounds(speed, 0, 0, &dx1, &dy1, &dw, &dh);
+		gfx->setCursor(COL_L_X + (COL_L_W - dw) / 2, MID_Y + 22);
+		gfx->print(speed);
+
+		// ─── ERS MODE (center column, upper) ───
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_C_X + 5, MID_Y + 5);
+		gfx->print("ERS MODE");
+
+		// ERS Deploy Mode value
+		gfx->setTextSize(2);
+		uint16_t ersColor = VALUE_CLR;
+		String ersModeUpper = ersDeployMode;
+		ersModeUpper.toUpperCase();
+		if (ersModeUpper == "NONE" || ersDeployMode == "--") {
+			ersColor = LABEL_CLR;
+		} else if (ersModeUpper.indexOf("ATTACK") >= 0 || ersModeUpper.indexOf("HOTLAP") >= 0) {
+			ersColor = ACCENT_RED;
+		} else if (ersModeUpper.indexOf("QUAL") >= 0) {
+			ersColor = MAGENTA;
+		}
+		gfx->setTextColor(ersColor);
+		gfx->getTextBounds(ersDeployMode, 0, 0, &dx1, &dy1, &dw, &dh);
+		gfx->setCursor(COL_C_X + (COL_C_W - dw) / 2, MID_Y + 22);
+		gfx->print(ersDeployMode);
+
+		// KERS vertical bar (left side of center column)
+		int kersVal = kersLevel.toInt();
+		int ersBarX = COL_C_X + 5;
+		int ersBarY = MID_Y + 45;
+		int ersBarW = 10;
+		int ersBarH = 80;
+		gfx->drawRect(ersBarX, ersBarY, ersBarW, ersBarH, LABEL_CLR);
+		int fillH = (kersVal * (ersBarH - 2)) / 100;
+		uint16_t kersColor = kersVal > 50 ? ACCENT_GRN : (kersVal > 20 ? YELLOW : ACCENT_RED);
+		// Clear unfilled portion
+		int clearH = (ersBarH - 2) - fillH;
+		if (clearH > 0) {
+			gfx->fillRect(ersBarX + 1, ersBarY + 1, ersBarW - 2, clearH, BG_DARK);
+		}
+		if (fillH > 0) {
+			gfx->fillRect(ersBarX + 1, ersBarY + (ersBarH - 1 - fillH), ersBarW - 2, fillH, kersColor);
+		}
+
+		// Gear (large) in center
+		gfx->setTextSize(6);
+		gfx->setTextColor(YELLOW);
+		gfx->getTextBounds(gear, 0, 0, &dx1, &dy1, &dw, &dh);
+		gfx->setCursor(COL_C_X + (COL_C_W - dw) / 2, MID_Y + 55);
+		gfx->print(gear);
+
+		// ─── FUEL CONSUMPTION (right column, upper) ───
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_R_X + 5, MID_Y + 5);
+		gfx->print("FUEL CONS");
+		gfx->setTextSize(2);
+		gfx->setTextColor(VALUE_CLR);
+		gfx->setCursor(COL_R_X + 10, MID_Y + 22);
+		gfx->print(fuelLitersPerLap);
+
+		// Residual laps
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_R_X + 5, MID_Y + 50);
+		gfx->print("RES LAPS");
+		gfx->setTextSize(2);
+		gfx->setTextColor(fuelVal < 3.0f ? ACCENT_RED : VALUE_CLR);
+		gfx->setCursor(COL_R_X + 10, MID_Y + 66);
+		gfx->print(fuelRemainingLaps);
+
+		// ─── TYRE/BRAKE AREA (lower middle) ───
+		int tyreY = MID_Y + 110;
+		gfx->drawLine(COL_L_X, tyreY, TC2_X, tyreY, RGB565(60, 60, 60));
+
+		// Tyre pressures + temps (left column)
+		gfx->setTextSize(1);
+		int tHalf = COL_L_W / 2;
+		// FL
+		gfx->setTextColor(TYRE_CLR);
+		gfx->setCursor(COL_L_X + 3, tyreY + 5);
+		gfx->print(tyrePressureFrontLeft);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_L_X + 3, tyreY + 18);
+		gfx->print(tyreTemperatureFrontLeft + "C");
+		// FR
+		gfx->setTextColor(TYRE_CLR);
+		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 5);
+		gfx->print(tyrePressureFrontRight);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 18);
+		gfx->print(tyreTemperatureFrontRight + "C");
+		// RL
+		gfx->setTextColor(TYRE_CLR);
+		gfx->setCursor(COL_L_X + 3, tyreY + 54);
+		gfx->print(tyrePressureRearLeft);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_L_X + 3, tyreY + 67);
+		gfx->print(tyreTemperatureRearLeft + "C");
+		// RR
+		gfx->setTextColor(TYRE_CLR);
+		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 54);
+		gfx->print(tyrePressureRearRight);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 67);
+		gfx->print(tyreTemperatureRearRight + "C");
+
+		// Center: ARB F | POS | ARB R
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_C_X + 20, tyreY + 5);
+		gfx->print("ARB F");
+		gfx->setTextColor(VALUE_CLR);
+		gfx->setTextSize(2);
+		gfx->setCursor(COL_C_X + 22, tyreY + 18);
+		gfx->print(arbFront);
+
+		// Position
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_C_X + 55, tyreY + 40);
+		gfx->print("P");
+		gfx->setTextSize(3);
+		gfx->setTextColor(YELLOW);
+		gfx->setCursor(COL_C_X + 55, tyreY + 52);
+		gfx->print(position);
+
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_C_X + 90, tyreY + 5);
+		gfx->print("ARB R");
+		gfx->setTextColor(VALUE_CLR);
+		gfx->setTextSize(2);
+		gfx->setCursor(COL_C_X + 92, tyreY + 18);
+		gfx->print(arbRear);
+
+		// Brake temps (right column)
+		gfx->setTextSize(1);
+		gfx->setTextColor(LABEL_CLR);
+		gfx->setCursor(COL_R_X + 5, tyreY + 5);
+		gfx->print(brakeTemperatureFrontLeft);
+		gfx->setCursor(COL_R_X + 60, tyreY + 5);
+		gfx->print(brakeTemperatureFrontRight);
+		gfx->setCursor(COL_R_X + 5, tyreY + 54);
+		gfx->print(brakeTemperatureRearLeft);
+		gfx->setCursor(COL_R_X + 60, tyreY + 54);
+		gfx->print(brakeTemperatureRearRight);
+
+		// ─── BOTTOM BAR: H WIND | ENG MAP | BRK BIAS | BRK MIG | SOC% | REAR% ───
+		gfx->fillRect(0, BOT_BAR_Y, W, BOT_BAR_H, BG_BOTTOM);
+		gfx->drawLine(0, BOT_BAR_Y, W, BOT_BAR_Y, RGB565(80, 80, 80));
+
+		int botColW = W / 6;  // 80px each
+
+		// Bottom bar cells: label + value
+		const char* botLabels[] = {"H WIND", "ENG MAP", "BRK BIAS", "BRK MIG", "SOC %", "REAR %"};
+		String botValues[] = {headWind, (popupMessage.length() > 0 ? popupMessage : String("--")), brakeBias, brkMigration, kersLevel, rearBrakeBias};
+		uint16_t botColors[] = {VALUE_CLR, VALUE_CLR, MAGENTA, VALUE_CLR, (kersVal > 20 ? ACCENT_GRN : ACCENT_RED), VALUE_CLR};
+
+		for (int i = 0; i < 6; i++) {
+			int cellX = i * botColW;
+			// Label
+			gfx->setTextSize(1);
+			gfx->setTextColor(LABEL_CLR);
+			gfx->setCursor(cellX + 2, BOT_BAR_Y + 2);
+			gfx->print(botLabels[i]);
+			// Value
+			gfx->setTextSize(1);
+			uint16_t vColor = botColors[i];
+			if (botValues[i] == "--" || botValues[i] == "None") vColor = LABEL_CLR;
+			gfx->setTextColor(vColor);
+			gfx->setCursor(cellX + 2, BOT_BAR_Y + 15);
+			gfx->print(botValues[i]);
+		}
 	}
 
 	void drawGear(int32_t x, int32_t y)
