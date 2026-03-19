@@ -2143,11 +2143,13 @@ public:
 		}
 
 		// PRIORIDADE 2: Pop-up temporário (popupMessage) - mensagens de mudanças menores
-		// Only show if it's a real message (not empty, not "NORMAL", not "NONE", not "0")
+		// Only show if SimHub popup passes validation (must contain ':' like "BIAS: 54.0")
+		// OR if it came from the ButtonBox via UART (popupFromUart bypasses validation)
 		if (popupUpper.length() > 0 &&
 			popupUpper != "NORMAL" &&
 			popupUpper != "NONE" &&
-			popupUpper != "0") {
+			popupUpper != "0" &&
+			(popupFromUart || isValidAlertString(popupUpper))) {
 			// Override any existing alert for control changes (ABS/TC/BIAS/MAP)
 			// Popups are short-lived and should take precedence over flags
 			shouldShowAlert = true;
