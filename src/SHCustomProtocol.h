@@ -5,6 +5,7 @@
 #include <Arduino_GFX_Library.h>
 #include <map>
 #include "logo_image.h"  // Logo image array
+#include "TrackMaps.h"   // Track map PROGMEM point arrays
 #include <Wire.h>
 #include <Wire.h>
 
@@ -1528,6 +1529,42 @@ public:
 		gfx->print("Time left: " + sessionTimeLeft);
 	}
 
+	// ── Track Map Helpers ──────────────────────────────────────
+	const TrackMapEntry* findTrackMap(const String& tid) {
+		String lower = tid;
+		lower.toLowerCase();
+		for (uint8_t i = 0; i < TRACK_MAP_COUNT; i++) {
+			if (lower.indexOf(TRACK_MAP_TABLE[i].id) >= 0) {
+				return &TRACK_MAP_TABLE[i];
+			}
+		}
+		return nullptr;
+	}
+
+	void drawTrackPolyline(const int16_t* points, uint8_t count, int ox, int oy, uint16_t color) {
+		for (uint8_t i = 0; i < count; i++) {
+			uint8_t next = (i + 1) % count;
+			int x0 = (int16_t)pgm_read_word(&points[i * 2])     + ox;
+			int y0 = (int16_t)pgm_read_word(&points[i * 2 + 1]) + oy;
+			int x1 = (int16_t)pgm_read_word(&points[next * 2])     + ox;
+			int y1 = (int16_t)pgm_read_word(&points[next * 2 + 1]) + oy;
+			gfx->drawLine(x0, y0, x1, y1, color);
+		}
+	}
+
+	void getPositionOnTrack(const int16_t* points, uint8_t count, float trackPos, int ox, int oy, int& outX, int& outY) {
+		float idx = trackPos * count;
+		int i0 = (int)idx % count;
+		int i1 = (i0 + 1) % count;
+		float frac = idx - (int)idx;
+		int x0 = (int16_t)pgm_read_word(&points[i0 * 2]);
+		int y0 = (int16_t)pgm_read_word(&points[i0 * 2 + 1]);
+		int x1 = (int16_t)pgm_read_word(&points[i1 * 2]);
+		int y1 = (int16_t)pgm_read_word(&points[i1 * 2 + 1]);
+		outX = (int)(x0 + frac * (x1 - x0)) + ox;
+		outY = (int)(y0 + frac * (y1 - y0)) + oy;
+	}
+
 	void drawMapPageContent() {
 		// PAGE 6: Track Map + Strategy
 		// ── Header (40px) ──────────────────────────────────────────
@@ -1566,57 +1603,82 @@ public:
 		gfx->setCursor(340, 24);
 		gfx->print("FUEL LAPS");
 
-		// ── Oval Track Map (left side: 0-270px, y: 45-230) ────────
-		const int mapCX = 135;   // Center X of oval
-		const int mapCY = 140;   // Center Y of oval
-		const int mapRX = 110;   // Radius X (horizontal)
-		const int mapRY = 70;    // Radius Y (vertical)
+		// ── Track Map (left side: 0-270px, y: 42-230) ─────────────
+		const int mapOX = 25;    // Offset X for track polyline
+		const int mapOY = 50;    // Offset Y for track polyline
 
-		// Draw oval track outline (double line for thickness)
-		gfx->drawEllipse(mapCX, mapCY, mapRX, mapRY, RGB565(60, 60, 60));
-		gfx->drawEllipse(mapCX, mapCY, mapRX - 1, mapRY - 1, RGB565(80, 80, 80));
-		gfx->drawEllipse(mapCX, mapCY, mapRX + 1, mapRY + 1, RGB565(60, 60, 60));
-
-		// Start/Finish line marker at top of oval
-		gfx->drawLine(mapCX - 4, mapCY - mapRY - 4, mapCX + 4, mapCY - mapRY - 4, WHITE);
-		gfx->drawLine(mapCX - 4, mapCY - mapRY + 4, mapCX + 4, mapCY - mapRY + 4, WHITE);
-
-		// Calculate positions on oval: angle = trackPos * 2π - π/2 (0.0 = top)
 		float myPos = trackPositionPercent.toFloat();
 		float aheadPos = aheadTrackPosition.toFloat();
 		float behindPos = behindTrackPosition.toFloat();
 
-		// Car ahead (red dot, r=4)
-		if (aheadPos > 0.001f) {
-			float aAngle = aheadPos * TWO_PI - HALF_PI;
-			int aX = mapCX + (int)(mapRX * cos(aAngle));
-			int aY = mapCY + (int)(mapRY * sin(aAngle));
-			gfx->fillCircle(aX, aY, 4, RED);
-			gfx->setTextColor(RED);
-			gfx->setTextSize(1);
-			gfx->setCursor(aX + 6, aY - 3);
-			gfx->print("A");
-		}
+		const TrackMapEntry* tmap = findTrackMap(trackId);
 
-		// Car behind (blue dot, r=4)
-		if (behindPos > 0.001f) {
-			float bAngle = behindPos * TWO_PI - HALF_PI;
-			int bX = mapCX + (int)(mapRX * cos(bAngle));
-			int bY = mapCY + (int)(mapRY * sin(bAngle));
-			gfx->fillCircle(bX, bY, 4, BLUE);
-			gfx->setTextColor(BLUE);
-			gfx->setTextSize(1);
-			gfx->setCursor(bX + 6, bY - 3);
-			gfx->print("B");
-		}
+		if (tmap) {
+			// ── Real track polyline from PROGMEM ──
+			drawTrackPolyline(tmap->points, tmap->numPoints, mapOX, mapOY, RGB565(80, 80, 80));
 
-		// Player (green dot, r=5 — drawn last so it's on top)
-		if (myPos > 0.001f || hasReceivedData) {
-			float mAngle = myPos * TWO_PI - HALF_PI;
-			int mX = mapCX + (int)(mapRX * cos(mAngle));
-			int mY = mapCY + (int)(mapRY * sin(mAngle));
-			gfx->fillCircle(mX, mY, 5, GREEN);
-			gfx->drawCircle(mX, mY, 6, WHITE);  // White outline for visibility
+			// Start/Finish marker at point[0]
+			int sfX = (int16_t)pgm_read_word(&tmap->points[0]) + mapOX;
+			int sfY = (int16_t)pgm_read_word(&tmap->points[1]) + mapOY;
+			gfx->drawLine(sfX - 4, sfY - 4, sfX + 4, sfY - 4, WHITE);
+			gfx->drawLine(sfX - 4, sfY + 4, sfX + 4, sfY + 4, WHITE);
+
+			int dotX, dotY;
+
+			// Car ahead (red dot)
+			if (aheadPos > 0.001f) {
+				getPositionOnTrack(tmap->points, tmap->numPoints, aheadPos, mapOX, mapOY, dotX, dotY);
+				gfx->fillCircle(dotX, dotY, 4, RED);
+				gfx->setTextColor(RED); gfx->setTextSize(1);
+				gfx->setCursor(dotX + 6, dotY - 3); gfx->print("A");
+			}
+
+			// Car behind (blue dot)
+			if (behindPos > 0.001f) {
+				getPositionOnTrack(tmap->points, tmap->numPoints, behindPos, mapOX, mapOY, dotX, dotY);
+				gfx->fillCircle(dotX, dotY, 4, BLUE);
+				gfx->setTextColor(BLUE); gfx->setTextSize(1);
+				gfx->setCursor(dotX + 6, dotY - 3); gfx->print("B");
+			}
+
+			// Player (green dot, drawn last)
+			if (myPos > 0.001f || hasReceivedData) {
+				getPositionOnTrack(tmap->points, tmap->numPoints, myPos, mapOX, mapOY, dotX, dotY);
+				gfx->fillCircle(dotX, dotY, 5, GREEN);
+				gfx->drawCircle(dotX, dotY, 6, WHITE);
+			}
+		} else {
+			// ── Fallback: generic oval ──
+			const int mapCX = 135, mapCY = 140, mapRX = 110, mapRY = 70;
+			gfx->drawEllipse(mapCX, mapCY, mapRX, mapRY, RGB565(60, 60, 60));
+			gfx->drawEllipse(mapCX, mapCY, mapRX - 1, mapRY - 1, RGB565(80, 80, 80));
+			gfx->drawEllipse(mapCX, mapCY, mapRX + 1, mapRY + 1, RGB565(60, 60, 60));
+			gfx->drawLine(mapCX - 4, mapCY - mapRY - 4, mapCX + 4, mapCY - mapRY - 4, WHITE);
+			gfx->drawLine(mapCX - 4, mapCY - mapRY + 4, mapCX + 4, mapCY - mapRY + 4, WHITE);
+
+			if (aheadPos > 0.001f) {
+				float aAngle = aheadPos * TWO_PI - HALF_PI;
+				int aX = mapCX + (int)(mapRX * cos(aAngle));
+				int aY = mapCY + (int)(mapRY * sin(aAngle));
+				gfx->fillCircle(aX, aY, 4, RED);
+				gfx->setTextColor(RED); gfx->setTextSize(1);
+				gfx->setCursor(aX + 6, aY - 3); gfx->print("A");
+			}
+			if (behindPos > 0.001f) {
+				float bAngle = behindPos * TWO_PI - HALF_PI;
+				int bX = mapCX + (int)(mapRX * cos(bAngle));
+				int bY = mapCY + (int)(mapRY * sin(bAngle));
+				gfx->fillCircle(bX, bY, 4, BLUE);
+				gfx->setTextColor(BLUE); gfx->setTextSize(1);
+				gfx->setCursor(bX + 6, bY - 3); gfx->print("B");
+			}
+			if (myPos > 0.001f || hasReceivedData) {
+				float mAngle = myPos * TWO_PI - HALF_PI;
+				int mX = mapCX + (int)(mapRX * cos(mAngle));
+				int mY = mapCY + (int)(mapRY * sin(mAngle));
+				gfx->fillCircle(mX, mY, 5, GREEN);
+				gfx->drawCircle(mX, mY, 6, WHITE);
+			}
 		}
 
 		// ── Right Panel: Strategy Data (x: 275-475, y: 45-230) ────
