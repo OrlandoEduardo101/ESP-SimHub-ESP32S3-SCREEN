@@ -205,6 +205,12 @@ private:
 	String headWind = "0";           // [66] Wind Speed
 	String rearBrakeBias = "0.0";    // [67] Rear Brake Bias
 
+	// Bloco 10: Track Map (índices 68-71)
+	String trackPositionPercent = "0.000";  // [68] Posição jogador na pista (0.0-1.0)
+	String aheadTrackPosition = "0.000";    // [69] Posição carro da frente
+	String behindTrackPosition = "0.000";   // [70] Posição carro de trás
+	String trackId = "Unknown";             // [71] Nome/ID da pista
+
 	// Temperatura pneus (índices 15-18) - promoted from local vars
 	String tyreTemperatureFrontLeft = "0";
 	String tyreTemperatureFrontRight = "0";
@@ -242,7 +248,7 @@ private:
 		PAGE_ADVANCED = 3,       // Advanced telemetry (Motor, Wear, Env, DRS, KERS, Turbo)
 		PAGE_RELATIVE = 4,       // Relative/Head-to-head
 		PAGE_LAPS = 5,           // Laps/Sectors analysis
-		PAGE_LEADERBOARD = 6,    // Leaderboard (placeholder)
+		PAGE_MAP = 6,            // Track Map + Strategy
 		PAGE_499P = 7            // Ferrari 499P dashboard
 	};
 	DashboardPage currentPage = PAGE_RACE;
@@ -777,7 +783,14 @@ public:
 		arbRear = FlowSerialReadStringUntil(';');
 		brkMigration = FlowSerialReadStringUntil(';');
 		headWind = FlowSerialReadStringUntil(';');
-		rearBrakeBias = FlowSerialReadStringUntil(';');  // Último campo (índice 67)
+		rearBrakeBias = FlowSerialReadStringUntil(';');  // [67]
+
+		// BLOCO 10: Track Map (índices 68-71)
+		trackPositionPercent = FlowSerialReadStringUntil(';');
+		aheadTrackPosition = FlowSerialReadStringUntil(';');
+		behindTrackPosition = FlowSerialReadStringUntil(';');
+		trackId = FlowSerialReadStringUntil(';');  // Último campo (índice 71)
+		trackId.trim();
 
 		// Validate brakeBias (should be between 0-100)
 		brakeBias.trim();
@@ -872,8 +885,8 @@ public:
 			case PAGE_LAPS:
 				drawLapsPageContent();
 				break;
-			case PAGE_LEADERBOARD:
-				drawLeaderboardPageContent();
+			case PAGE_MAP:
+				drawMapPageContent();
 				break;
 			case PAGE_499P:
 				draw499PPageContent();
@@ -1515,99 +1528,203 @@ public:
 		gfx->print("Time left: " + sessionTimeLeft);
 	}
 
-	void drawLeaderboardPageContent() {
-		// PAGE 6: Leaderboard - with nice styling
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 60, 20));  // Header background
-		gfx->setTextColor(GREEN);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 12);
-		gfx->print("LEADERBOARD");
-
-		// Leaderboard box (full width)
-		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 215, WHITE);
-		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 57);
-		gfx->print("POS  DRIVER          TIME       GAP");
-
-		// Draw separator line
-		gfx->drawLine(5, 75, SCREEN_WIDTH - 5, 75, RGB565(100, 100, 100));
-
-		// Leaderboard entries - small font
-		gfx->setTextSize(1);
-		int yPos = 85;
-
-		// 1st place (leading driver)
-		gfx->setTextColor(YELLOW);
-		gfx->setCursor(10, yPos);
-		gfx->print("1");
-		gfx->setCursor(30, yPos);
-		gfx->print("Driver A");
-		gfx->setCursor(130, yPos);
-		gfx->print("01:34.23");
-		gfx->setCursor(200, yPos);
-		gfx->print("--:--");
-
-		yPos += 18;
-
-		// 2nd place
-		gfx->setTextColor(WHITE);
-		gfx->setCursor(10, yPos);
-		gfx->print("2");
-		gfx->setCursor(30, yPos);
-		gfx->print("Driver B");
-		gfx->setCursor(130, yPos);
-		gfx->print("01:34.89");
-		gfx->setCursor(200, yPos);
-		gfx->print("+0.66s");
-
-		yPos += 18;
-
-		// 3rd place (YOU)
+	void drawMapPageContent() {
+		// PAGE 6: Track Map + Strategy
+		// ── Header (40px) ──────────────────────────────────────────
+		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 40, 60));
 		gfx->setTextColor(CYAN);
-		gfx->setCursor(10, yPos);
-		gfx->print("3");
-		gfx->setCursor(30, yPos);
-		gfx->print(">>> YOU <<<");
-		gfx->setCursor(130, yPos);
-		gfx->print("01:35.12");
-		gfx->setCursor(200, yPos);
-		gfx->print("+0.89s");
+		gfx->setTextSize(2);
+		gfx->setCursor(10, 4);
+		gfx->print("MAP");
 
-		yPos += 18;
-
-		// 4th place
+		// Track name (truncate if too long)
 		gfx->setTextColor(WHITE);
-		gfx->setCursor(10, yPos);
-		gfx->print("4");
-		gfx->setCursor(30, yPos);
-		gfx->print("Driver C");
-		gfx->setCursor(130, yPos);
-		gfx->print("01:35.67");
-		gfx->setCursor(200, yPos);
-		gfx->print("+1.44s");
-
-		yPos += 18;
-
-		// 5th place
-		gfx->setTextColor(WHITE);
-		gfx->setCursor(10, yPos);
-		gfx->print("5");
-		gfx->setCursor(30, yPos);
-		gfx->print("Driver D");
-		gfx->setCursor(130, yPos);
-		gfx->print("01:36.01");
-		gfx->setCursor(200, yPos);
-		gfx->print("+1.78s");
-
-		// Summary bar at bottom
-		gfx->drawRect(5, 265, 250, 20, CYAN);
-		gfx->fillRect(5, 265, 250, 20, CYAN);
-		gfx->setTextColor(BLACK);
 		gfx->setTextSize(1);
-		gfx->setCursor(10, 270);
-		gfx->print("Your Gap to Leader: +0.89s");
+		String displayTrack = trackId;
+		if (displayTrack.length() > 20) displayTrack = displayTrack.substring(0, 20);
+		gfx->setCursor(60, 8);
+		gfx->print(displayTrack);
+
+		// Position + Fuel in header
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(2);
+		gfx->setCursor(240, 4);
+		gfx->print("P" + position);
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(1);
+		gfx->setCursor(240, 24);
+		gfx->print("/" + opponentsCount);
+
+		// Fuel remaining laps in header
+		uint16_t fuelColor = fuelRemainingLaps.toFloat() < 3.0 ? RED : GREEN;
+		gfx->setTextColor(fuelColor);
+		gfx->setTextSize(2);
+		gfx->setCursor(340, 4);
+		gfx->print(fuelRemainingLaps);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setTextSize(1);
+		gfx->setCursor(340, 24);
+		gfx->print("FUEL LAPS");
+
+		// ── Oval Track Map (left side: 0-270px, y: 45-230) ────────
+		const int mapCX = 135;   // Center X of oval
+		const int mapCY = 140;   // Center Y of oval
+		const int mapRX = 110;   // Radius X (horizontal)
+		const int mapRY = 70;    // Radius Y (vertical)
+
+		// Draw oval track outline (double line for thickness)
+		gfx->drawEllipse(mapCX, mapCY, mapRX, mapRY, RGB565(60, 60, 60));
+		gfx->drawEllipse(mapCX, mapCY, mapRX - 1, mapRY - 1, RGB565(80, 80, 80));
+		gfx->drawEllipse(mapCX, mapCY, mapRX + 1, mapRY + 1, RGB565(60, 60, 60));
+
+		// Start/Finish line marker at top of oval
+		gfx->drawLine(mapCX - 4, mapCY - mapRY - 4, mapCX + 4, mapCY - mapRY - 4, WHITE);
+		gfx->drawLine(mapCX - 4, mapCY - mapRY + 4, mapCX + 4, mapCY - mapRY + 4, WHITE);
+
+		// Calculate positions on oval: angle = trackPos * 2π - π/2 (0.0 = top)
+		float myPos = trackPositionPercent.toFloat();
+		float aheadPos = aheadTrackPosition.toFloat();
+		float behindPos = behindTrackPosition.toFloat();
+
+		// Car ahead (red dot, r=4)
+		if (aheadPos > 0.001f) {
+			float aAngle = aheadPos * TWO_PI - HALF_PI;
+			int aX = mapCX + (int)(mapRX * cos(aAngle));
+			int aY = mapCY + (int)(mapRY * sin(aAngle));
+			gfx->fillCircle(aX, aY, 4, RED);
+			gfx->setTextColor(RED);
+			gfx->setTextSize(1);
+			gfx->setCursor(aX + 6, aY - 3);
+			gfx->print("A");
+		}
+
+		// Car behind (blue dot, r=4)
+		if (behindPos > 0.001f) {
+			float bAngle = behindPos * TWO_PI - HALF_PI;
+			int bX = mapCX + (int)(mapRX * cos(bAngle));
+			int bY = mapCY + (int)(mapRY * sin(bAngle));
+			gfx->fillCircle(bX, bY, 4, BLUE);
+			gfx->setTextColor(BLUE);
+			gfx->setTextSize(1);
+			gfx->setCursor(bX + 6, bY - 3);
+			gfx->print("B");
+		}
+
+		// Player (green dot, r=5 — drawn last so it's on top)
+		if (myPos > 0.001f || hasReceivedData) {
+			float mAngle = myPos * TWO_PI - HALF_PI;
+			int mX = mapCX + (int)(mapRX * cos(mAngle));
+			int mY = mapCY + (int)(mapRY * sin(mAngle));
+			gfx->fillCircle(mX, mY, 5, GREEN);
+			gfx->drawCircle(mX, mY, 6, WHITE);  // White outline for visibility
+		}
+
+		// ── Right Panel: Strategy Data (x: 275-475, y: 45-230) ────
+		const int panelX = 280;
+		const int panelW = SCREEN_WIDTH - panelX - 5;
+		int yPos = 48;
+		const int rowH = 22;
+
+		// Vertical separator line
+		gfx->drawLine(275, 42, 275, 230, RGB565(60, 60, 60));
+
+		// Delta
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("DELTA");
+		gfx->setTextColor(sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 60, yPos - 2);
+		gfx->print(sessionBestLiveDeltaSeconds);
+		yPos += rowH + 4;
+
+		// Gap Ahead
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("GAP");
+		gfx->setTextColor(RED);
+		gfx->setCursor(panelX + 25, yPos);
+		gfx->print("\x18");  // Up arrow
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 60, yPos - 2);
+		gfx->print(driverAheadGap);
+		yPos += rowH;
+
+		// Gap Behind
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("GAP");
+		gfx->setTextColor(BLUE);
+		gfx->setCursor(panelX + 25, yPos);
+		gfx->print("\x19");  // Down arrow
+		gfx->setTextColor(ORANGE);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 60, yPos - 2);
+		gfx->print(driverBehindGap);
+		yPos += rowH + 4;
+
+		// Speed + Gear (same row)
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("SPD");
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 35, yPos - 2);
+		gfx->print(speed);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setTextSize(1);
+		gfx->setCursor(panelX + 110, yPos);
+		gfx->print("G");
+		gfx->setTextColor(WHITE);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 125, yPos - 2);
+		gfx->print(gear);
+		yPos += rowH + 2;
+
+		// Brake Bias
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("BB");
+		gfx->setTextColor(MAGENTA);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 35, yPos - 2);
+		gfx->print(brakeBias);
+		yPos += rowH;
+
+		// TC / ABS
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("TC");
+		gfx->setTextColor(YELLOW);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 25, yPos - 2);
+		gfx->print(tcLevel);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setTextSize(1);
+		gfx->setCursor(panelX + 65, yPos);
+		gfx->print("ABS");
+		gfx->setTextColor(BLUE);
+		gfx->setTextSize(2);
+		gfx->setCursor(panelX + 95, yPos - 2);
+		gfx->print(absLevel);
+		yPos += rowH;
+
+		// Current Lap Time
+		gfx->setTextSize(1);
+		gfx->setTextColor(RGB565(150, 150, 150));
+		gfx->setCursor(panelX, yPos);
+		gfx->print("LAP");
+		gfx->setTextColor(lapInvalidated == "True" ? RED : WHITE);
+		gfx->setTextSize(1);
+		gfx->setCursor(panelX + 35, yPos);
+		gfx->print(currentLapTime);
 	}
 
 	void idle() {
