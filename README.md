@@ -46,8 +46,9 @@ This repository currently contains two active firmware targets:
 
 - Source entrypoint: `src/main_wheel.cpp`
 - PlatformIO env: `wroom1-n8r8-wheel`
-- Main role: USB HID gamepad + matrix/encoders/hall sensors + UART integration with display
-- Hardware: ESP32-S3 WROOM1 N8R8 + MCP23017 + PCA9685 + wheel controls
+- Main role: USB HID gamepad + matrix/encoders/hall sensors + auto-detect support for F1 wheel or simpler round wheel
+- Hardware: ESP32-S3 WROOM1 N8R8 + MCP23017 + PCA9685 (F1) or MAX7219 + WS2812 (round wheel)
+- Round wheel build guide: `docs/VOLANTE_REDONDO.md`
 
 ## ✅ Key Features
 
@@ -199,6 +200,8 @@ Display firmware options in `src/main.cpp`:
 - `INCLUDE_RGB_LEDS_NEOPIXELBUS`: Enable NeoPixel LED support
 
 Wheel firmware options are mainly in `src/main_wheel.cpp` and `platformio.ini` (`wroom1-n8r8-wheel` env).
+
+For the simpler round wheel variant using the same firmware/env, see `docs/VOLANTE_REDONDO.md`.
 
 ### Logo Customization
 

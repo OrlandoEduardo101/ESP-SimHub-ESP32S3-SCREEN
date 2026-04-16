@@ -7,12 +7,22 @@
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <NeoPixelBusLg.h>
 
 #define DEVICE_NAME "ESP-ButtonBox-WHEEL"
 
 // I2C pins
 #define I2C_SDA 8
 #define I2C_SCL 9
+
+// MAX7219 7-segment display (software SPI) — Round wheel local display
+#define MAX7219_DIN_PIN 12
+#define MAX7219_CLK_PIN 13
+#define MAX7219_CS_PIN  4
+
+// WS2812B addressable LEDs — direct control in round wheel mode
+#define WS2812_DATA_PIN 10
+#define WS2812_LED_COUNT 16
 
 // ================================
 // USB HID GAMEPAD (Custom: 64 buttons + 10 axes)
@@ -177,6 +187,65 @@ static const int UART_TX_PIN = 43;
 void scanI2CBusDebug();
 void uartRoundtripTask();
 void handleWt32UartRx();
+
+// ================================
+// ROUND WHEEL MODE
+// ================================
+// Auto-detected: when PCA9685 is absent (!ledAvailable), the firmware
+// activates local display (MAX7219 + WS2812) and SimHub CDC protocol.
+// In F1 mode (PCA9685 present), these features are inactive.
+bool roundWheelMode = false;
+
+// SimHub CDC protocol support (ArqSerial reads from Serial = USB CDC)
+Stream* DebugPort = nullptr;  // Required by ArqSerial.h (unused, debug goes to ButtonBoxSerial)
+#include "FlowSerialRead.h"
+
+// SimHub handshake constants
+#define SIMHUB_VERSION 'j'
+#define SH_SIGNATURE_0 0x1E
+#define SH_SIGNATURE_1 0x98
+#define SH_SIGNATURE_2 0x01
+#define SH_MESSAGE_HEADER 0x03
+
+// WS2812 LED strip (round wheel mode)
+NeoPixelBusLg<NeoGrbFeature, NeoEsp32BitBangWs2812xMethod, NeoGammaTableMethod> ws2812Strip(WS2812_LED_COUNT, WS2812_DATA_PIN);
+bool ws2812Active = false;
+bool simhubLedControl = false;  // true when SimHub sends direct RGB LED data (command '6')
+bool simhubConnected = false;
+unsigned long lastSimhubActivity = 0;
+static const unsigned long SIMHUB_TIMEOUT_MS = 5000;
+
+// Telemetry data struct (populated from SimHub custom protocol)
+struct WheelTelemetry {
+    int speed;
+    char gear;
+    int rpmPercent;
+    int rpmRedLine;
+    int currentRpm;
+    String currentLapTime;
+    String lastLapTime;
+    String bestLapTime;
+    String delta;
+    String flag;
+    String alertMessage;
+    String spotterLeft;
+    String spotterRight;
+    String shiftLight;
+    String drsAvailable;
+    String drsActive;
+    String tcActive;
+    String absActive;
+    String position;
+    String gapAhead;
+    String gapBehind;
+    String fuelLaps;
+    bool hasData;
+};
+WheelTelemetry telemetry = {0, 'N', 0, 95, 0, "", "", "", "", "None", "", "0", "0", "0", "0", "0", "0", "0", "0", "--", "--", "0.0", false};
+
+// Forward declaration: pageValue is defined in MFC menu section (~line 1175)
+// Used by MAX7219 display update to select which telemetry page to show
+extern int8_t pageValue;
 
 // ================================
 // MATRIX STATE
@@ -410,6 +479,553 @@ void ledUpdate() {
 }
 
 // ================================
+// MAX7219 7-SEGMENT DISPLAY (Round Wheel)
+// ================================
+// MAX7219 registers
+#define MAX7219_NOOP        0x00
+#define MAX7219_DIGIT0      0x01
+#define MAX7219_DECODEMODE  0x09
+#define MAX7219_INTENSITY   0x0A
+#define MAX7219_SCANLIMIT   0x0B
+#define MAX7219_SHUTDOWN    0x0C
+#define MAX7219_DISPLAYTEST 0x0F
+
+// 7-segment raw patterns for characters (dp-a-b-c-d-e-f-g)
+// Used in raw mode (decode=0) for letters not in BCD
+static const uint8_t SEG_DASH = 0x01;       // '-'
+static const uint8_t SEG_BLANK = 0x00;      // blank
+// BCD characters: 0-9 = 0x00-0x09, '-' = 0x0A, 'E' = 0x0B, 'H' = 0x0C, 'L' = 0x0D, 'P' = 0x0E, blank = 0x0F
+
+bool max7219Available = false;
+
+void max7219Send(uint8_t reg, uint8_t data) {
+    digitalWrite(MAX7219_CS_PIN, LOW);
+    // Send register address (MSB first)
+    for (int8_t i = 7; i >= 0; i--) {
+        digitalWrite(MAX7219_CLK_PIN, LOW);
+        digitalWrite(MAX7219_DIN_PIN, (reg >> i) & 1);
+        digitalWrite(MAX7219_CLK_PIN, HIGH);
+    }
+    // Send data (MSB first)
+    for (int8_t i = 7; i >= 0; i--) {
+        digitalWrite(MAX7219_CLK_PIN, LOW);
+        digitalWrite(MAX7219_DIN_PIN, (data >> i) & 1);
+        digitalWrite(MAX7219_CLK_PIN, HIGH);
+    }
+    digitalWrite(MAX7219_CS_PIN, HIGH);
+}
+
+void setupMax7219() {
+    pinMode(MAX7219_DIN_PIN, OUTPUT);
+    pinMode(MAX7219_CLK_PIN, OUTPUT);
+    pinMode(MAX7219_CS_PIN, OUTPUT);
+    digitalWrite(MAX7219_CS_PIN, HIGH);
+
+    max7219Send(MAX7219_DISPLAYTEST, 0x00);  // Normal operation
+    max7219Send(MAX7219_SCANLIMIT, 0x07);    // Display all 8 digits
+    max7219Send(MAX7219_DECODEMODE, 0xFF);   // BCD decode all digits
+    max7219Send(MAX7219_INTENSITY, 0x08);    // Medium brightness
+    max7219Send(MAX7219_SHUTDOWN, 0x01);     // Normal operation (not shutdown)
+
+    // Clear all digits
+    for (uint8_t d = 1; d <= 8; d++) {
+        max7219Send(d, 0x0F);  // 0x0F = blank in BCD mode
+    }
+    max7219Available = true;
+    DBG("[MAX7219] Initialized on GPIO DIN=12 CLK=13 CS=4");
+}
+
+void max7219SetIntensity(uint8_t level) {
+    if (!max7219Available) return;
+    max7219Send(MAX7219_INTENSITY, level & 0x0F);  // 0-15
+}
+
+// Display: [speed 3 digits] [blank] [gear 1 digit] [blank] [blank] [blank]
+// Digits are numbered 1-8 from left to right on display
+// MAX7219 digit 1 = leftmost, digit 8 = rightmost
+void max7219ShowSpeedGear(int speed, char gear) {
+    if (!max7219Available) return;
+    // Speed on digits 1-3 (hundreds, tens, units)
+    int s = constrain(speed, 0, 999);
+    uint8_t d1 = (s >= 100) ? (s / 100) : 0x0F;    // hundreds or blank
+    uint8_t d2 = (s >= 10)  ? ((s / 10) % 10) : 0x0F; // tens or blank
+    uint8_t d3 = s % 10;                               // units always show
+    max7219Send(1, d1);
+    max7219Send(2, d2);
+    max7219Send(3, d3);
+
+    // Blank separator on digit 4
+    max7219Send(4, 0x0F);
+
+    // Gear on digit 5
+    if (gear == 'N' || gear == 'n') max7219Send(5, 0x0F);  // blank for neutral
+    else if (gear == 'R' || gear == 'r') max7219Send(5, 0x0A);  // '-' for reverse
+    else if (gear >= '0' && gear <= '9') max7219Send(5, gear - '0');
+    else max7219Send(5, 0x0A);  // '-' for unknown
+
+    // RPM bar indicator on digits 6-8 (simple: show RPM/1000 as number)
+    max7219Send(6, 0x0F);
+    max7219Send(7, 0x0F);
+    max7219Send(8, 0x0F);
+}
+
+// Display: lap time "mm:ss.fff" on 8 digits → "mm.ss.fff" (dots as decimal points)
+void max7219ShowLapTime(const String &lapTime) {
+    if (!max7219Available) return;
+    // Parse mm:ss.fff → extract digits
+    // Format: "00:00.000" or similar
+    String t = lapTime;
+    t.replace(":", "");
+    t.replace(".", "");
+    // Now t should be "0000000" (7 digits for mm ss fff)
+    // Display on 8 digits: [m1][m2.][s1][s2.][f1][f2][f3][blank]
+    for (uint8_t i = 0; i < 8; i++) {
+        if (i < (uint8_t)t.length()) {
+            uint8_t digit = t.charAt(i) - '0';
+            if (digit > 9) digit = 0x0F;
+            // Add decimal point after digit 2 (mm.) and digit 4 (ss.)
+            if (i == 1 || i == 3) digit |= 0x80;  // Set DP bit
+            max7219Send(i + 1, digit);
+        } else {
+            max7219Send(i + 1, 0x0F);
+        }
+    }
+}
+
+// Display: Position P## + Gap ahead
+void max7219ShowPosition(const String &pos, const String &gap) {
+    if (!max7219Available) return;
+    // Digit 1: 'P' (0x0E in BCD)
+    max7219Send(1, 0x0E);
+    // Digits 2-3: position number
+    int p = pos.toInt();
+    max7219Send(2, (p >= 10) ? (p / 10) : 0x0F);
+    max7219Send(3, p % 10);
+    // Digit 4: blank separator
+    max7219Send(4, 0x0F);
+    // Digits 5-8: gap (e.g. "1.2" → " 1.2")
+    String g = gap;
+    g.replace("-", "");
+    float gapVal = g.toFloat();
+    int gapInt = (int)(gapVal * 10);  // e.g. 1.2 → 12
+    if (gapInt > 9999) gapInt = 9999;
+    uint8_t g1 = (gapInt >= 1000) ? (gapInt / 1000) : 0x0F;
+    uint8_t g2 = (gapInt >= 100) ? ((gapInt / 100) % 10) : 0x0F;
+    uint8_t g3 = (gapInt >= 10) ? ((gapInt / 10) % 10) : 0x0F;
+    uint8_t g4 = gapInt % 10;
+    // Decimal point on g3 (one decimal place)
+    g3 |= 0x80;
+    max7219Send(5, g1);
+    max7219Send(6, g2);
+    max7219Send(7, g3);
+    max7219Send(8, g4);
+}
+
+void max7219Clear() {
+    if (!max7219Available) return;
+    for (uint8_t d = 1; d <= 8; d++) max7219Send(d, 0x0F);
+}
+
+// MAX7219 display update (throttled)
+static const unsigned long MAX7219_UPDATE_MS = 50;  // 20Hz refresh
+static unsigned long lastMax7219Update = 0;
+
+void updateMax7219Display() {
+    if (!max7219Available || !telemetry.hasData) return;
+    unsigned long now = millis();
+    if ((now - lastMax7219Update) < MAX7219_UPDATE_MS) return;
+    lastMax7219Update = now;
+
+    // pageValue is controlled by MFC menu (MFC_PAGE)
+    switch (pageValue) {
+        case 0: // Speed + Gear (default)
+            max7219ShowSpeedGear(telemetry.speed, telemetry.gear);
+            break;
+        case 1: // Current lap time
+            max7219ShowLapTime(telemetry.currentLapTime);
+            break;
+        case 2: // Best lap time
+            max7219ShowLapTime(telemetry.bestLapTime);
+            break;
+        case 3: // Position + Gap ahead
+            max7219ShowPosition(telemetry.position, telemetry.gapAhead);
+            break;
+        case 4: // RPM + Gear
+            max7219ShowSpeedGear(telemetry.currentRpm / 100, telemetry.gear);  // RPM in hundreds
+            break;
+        default:
+            max7219ShowSpeedGear(telemetry.speed, telemetry.gear);
+            break;
+    }
+}
+
+// ================================
+// WS2812 LED STRIP (Round Wheel)
+// ================================
+// Color definitions
+#define WS_COLOR_OFF     RgbColor(0, 0, 0)
+#define WS_COLOR_GREEN   RgbColor(0, 255, 0)
+#define WS_COLOR_YELLOW  RgbColor(255, 255, 0)
+#define WS_COLOR_ORANGE  RgbColor(255, 50, 0)
+#define WS_COLOR_RED     RgbColor(255, 0, 0)
+#define WS_COLOR_BLUE    RgbColor(0, 0, 255)
+#define WS_COLOR_PURPLE  RgbColor(128, 0, 255)
+#define WS_COLOR_WHITE   RgbColor(255, 255, 255)
+#define WS_COLOR_CYAN    RgbColor(0, 200, 255)
+
+static const unsigned long WS2812_UPDATE_MS = 20;  // 50Hz refresh
+static unsigned long lastWs2812Update = 0;
+
+void setupWs2812() {
+    ws2812Strip.Begin();
+    ws2812Strip.SetLuminance(60);  // Conservative default brightness
+    for (int i = 0; i < WS2812_LED_COUNT; i++) {
+        ws2812Strip.SetPixelColor(i, WS_COLOR_OFF);
+    }
+    ws2812Strip.Show();
+    ws2812Active = true;
+    DBG("[WS2812] Initialized on GPIO10, count=" + String(WS2812_LED_COUNT));
+}
+
+// Animate loading pattern when SimHub not connected
+void ws2812LoadingAnimation() {
+    static int pos = 0;
+    for (int i = 0; i < WS2812_LED_COUNT; i++) {
+        ws2812Strip.SetPixelColor(i, WS_COLOR_OFF);
+    }
+    // Bouncing LED
+    int actual = pos % (WS2812_LED_COUNT * 2 - 2);
+    if (actual >= WS2812_LED_COUNT) actual = (WS2812_LED_COUNT * 2 - 2) - actual;
+    ws2812Strip.SetPixelColor(actual, WS_COLOR_BLUE);
+    if (actual > 0) ws2812Strip.SetPixelColor(actual - 1, RgbColor(0, 0, 60));
+    if (actual < WS2812_LED_COUNT - 1) ws2812Strip.SetPixelColor(actual + 1, RgbColor(0, 0, 60));
+    ws2812Strip.Show();
+    pos++;
+}
+
+// Update LEDs from telemetry data (when SimHub is NOT controlling LEDs directly)
+void ws2812UpdateFromTelemetry() {
+    if (!telemetry.hasData) return;
+
+    // Clear all
+    for (int i = 0; i < WS2812_LED_COUNT; i++) {
+        ws2812Strip.SetPixelColor(i, WS_COLOR_OFF);
+    }
+
+    // RPM bar: fill LEDs proportionally to RPM percentage
+    int numLit = (telemetry.rpmPercent * WS2812_LED_COUNT) / 100;
+    if (numLit > WS2812_LED_COUNT) numLit = WS2812_LED_COUNT;
+
+    bool shiftFlash = (telemetry.shiftLight == "1") && ((millis() / 80) % 2 == 0);
+
+    for (int i = 0; i < numLit; i++) {
+        float pct = ((float)(i + 1) / WS2812_LED_COUNT) * 100.0f;
+        RgbColor color;
+        if (pct < 60) color = WS_COLOR_GREEN;
+        else if (pct < 80) color = WS_COLOR_YELLOW;
+        else if (pct < (float)telemetry.rpmRedLine) color = WS_COLOR_ORANGE;
+        else color = shiftFlash ? WS_COLOR_OFF : WS_COLOR_RED;
+        ws2812Strip.SetPixelColor(i, color);
+    }
+
+    // DRS override: full strip in blue/cyan
+    if (telemetry.drsActive == "1") {
+        for (int i = 0; i < numLit; i++) ws2812Strip.SetPixelColor(i, WS_COLOR_CYAN);
+    } else if (telemetry.drsAvailable == "1") {
+        for (int i = 0; i < numLit; i++) ws2812Strip.SetPixelColor(i, WS_COLOR_GREEN);
+    }
+
+    // Flag override on edges (first 2 + last 2 LEDs)
+    RgbColor flagColor = WS_COLOR_OFF;
+    bool flagBlink = false;
+    if (telemetry.flag == "Yellow") { flagColor = WS_COLOR_YELLOW; flagBlink = true; }
+    else if (telemetry.flag == "Blue") { flagColor = WS_COLOR_BLUE; flagBlink = true; }
+    else if (telemetry.flag == "Red") { flagColor = WS_COLOR_RED; }
+    else if (telemetry.flag == "Green") { flagColor = WS_COLOR_GREEN; }
+    else if (telemetry.flag == "White") { flagColor = WS_COLOR_WHITE; }
+    else if (telemetry.flag == "Checkered") { flagColor = WS_COLOR_WHITE; flagBlink = true; }
+
+    if (flagColor.R > 0 || flagColor.G > 0 || flagColor.B > 0) {
+        bool show = !flagBlink || ((millis() / 400) % 2 == 0);
+        if (show) {
+            ws2812Strip.SetPixelColor(0, flagColor);
+            ws2812Strip.SetPixelColor(1, flagColor);
+            ws2812Strip.SetPixelColor(WS2812_LED_COUNT - 2, flagColor);
+            ws2812Strip.SetPixelColor(WS2812_LED_COUNT - 1, flagColor);
+        }
+    }
+
+    // Spotter indicators (overrides edge LEDs)
+    if (telemetry.spotterLeft == "1") {
+        ws2812Strip.SetPixelColor(0, WS_COLOR_PURPLE);
+        ws2812Strip.SetPixelColor(1, WS_COLOR_PURPLE);
+    }
+    if (telemetry.spotterRight == "1") {
+        ws2812Strip.SetPixelColor(WS2812_LED_COUNT - 2, WS_COLOR_PURPLE);
+        ws2812Strip.SetPixelColor(WS2812_LED_COUNT - 1, WS_COLOR_PURPLE);
+    }
+
+    ws2812Strip.Show();
+}
+
+void updateWs2812LEDs() {
+    if (!ws2812Active) return;
+    unsigned long now = millis();
+    if ((now - lastWs2812Update) < WS2812_UPDATE_MS) return;
+    lastWs2812Update = now;
+
+    // If SimHub sends direct LED data (command '6'), skip local control
+    if (simhubLedControl) return;
+
+    if (simhubConnected && telemetry.hasData) {
+        ws2812UpdateFromTelemetry();
+    } else {
+        ws2812LoadingAnimation();
+    }
+}
+
+// ================================
+// SIMHUB CDC PROTOCOL HANDLER (Round Wheel)
+// ================================
+
+// Read WS2812 LED data sent by SimHub (command '6')
+void simhubReadLEDs() {
+    int mode = FlowSerialTimedRead();
+    while (mode > 0) {
+        if (mode == 1) {
+            // Full LED data
+            for (int j = 0; j < WS2812_LED_COUNT; j++) {
+                uint8_t r = FlowSerialTimedRead();
+                uint8_t g = FlowSerialTimedRead();
+                uint8_t b = FlowSerialTimedRead();
+                ws2812Strip.SetPixelColor(j, RgbColor(r, g, b));
+            }
+        } else if (mode == 2) {
+            // Partial LED data
+            int startLed = FlowSerialTimedRead();
+            int numLeds = FlowSerialTimedRead();
+            for (int j = startLed; j < startLed + numLeds && j < WS2812_LED_COUNT; j++) {
+                uint8_t r = FlowSerialTimedRead();
+                uint8_t g = FlowSerialTimedRead();
+                uint8_t b = FlowSerialTimedRead();
+                ws2812Strip.SetPixelColor(j, RgbColor(r, g, b));
+            }
+        } else if (mode == 3) {
+            // Repeated color
+            int startLed = FlowSerialTimedRead();
+            int numLeds = FlowSerialTimedRead();
+            uint8_t r = FlowSerialTimedRead();
+            uint8_t g = FlowSerialTimedRead();
+            uint8_t b = FlowSerialTimedRead();
+            for (int j = startLed; j < startLed + numLeds && j < WS2812_LED_COUNT; j++) {
+                ws2812Strip.SetPixelColor(j, RgbColor(r, g, b));
+            }
+        }
+        mode = FlowSerialTimedRead();
+    }
+    ws2812Strip.Show();
+    simhubLedControl = true;  // SimHub is controlling LEDs directly
+}
+
+// Read custom protocol data from SimHub (command 'P')
+// Parses all 72 fields (same order as customProtocol-dashBoard.txt)
+void simhubReadCustomProtocol() {
+    // BLOCO 1: Telemetria Básica (0-4)
+    telemetry.speed = FlowSerialReadStringUntil(';').toInt();
+    String gearStr = FlowSerialReadStringUntil(';');
+    telemetry.gear = gearStr.length() > 0 ? gearStr.charAt(0) : 'N';
+    telemetry.rpmPercent = FlowSerialReadStringUntil(';').toInt();
+    telemetry.rpmRedLine = FlowSerialReadStringUntil(';').toInt();
+    telemetry.currentRpm = FlowSerialReadStringUntil(';').toInt();
+
+    // BLOCO 2: Cronometragem (5-10)
+    telemetry.currentLapTime = FlowSerialReadStringUntil(';');
+    telemetry.lastLapTime = FlowSerialReadStringUntil(';');
+    telemetry.bestLapTime = FlowSerialReadStringUntil(';');
+    telemetry.delta = FlowSerialReadStringUntil(';');
+    FlowSerialReadStringUntil(';');  // [9] deltaProgress (skip)
+    FlowSerialReadStringUntil(';');  // [10] lapInvalidated (skip)
+
+    // BLOCO 3: Física e Pneus (11-24) — skip all 14 fields
+    for (int i = 0; i < 14; i++) FlowSerialReadStringUntil(';');
+
+    // BLOCO 4: Eletrônica (25-31)
+    FlowSerialReadStringUntil(';');  // [25] tcLevel
+    telemetry.tcActive = FlowSerialReadStringUntil(';');  // [26]
+    FlowSerialReadStringUntil(';');  // [27] absLevel
+    telemetry.absActive = FlowSerialReadStringUntil(';');  // [28]
+    for (int i = 0; i < 3; i++) FlowSerialReadStringUntil(';');  // [29-31]
+
+    // BLOCO 5: Estratégia (32-41)
+    telemetry.position = FlowSerialReadStringUntil(';');    // [32]
+    FlowSerialReadStringUntil(';');  // [33] opponentsCount
+    telemetry.gapAhead = FlowSerialReadStringUntil(';');    // [34]
+    telemetry.gapBehind = FlowSerialReadStringUntil(';');   // [35]
+    telemetry.fuelLaps = FlowSerialReadStringUntil(';');    // [36]
+    FlowSerialReadStringUntil(';');  // [37] fuelPerLap
+    FlowSerialReadStringUntil(';');  // [38] sessionTimeLeft
+    telemetry.flag = FlowSerialReadStringUntil(';');        // [39]
+    telemetry.flag.trim();
+    FlowSerialReadStringUntil(';');  // [40] penalties
+    FlowSerialReadStringUntil(';');  // [41] cutTrackWarnings
+
+    // BLOCO 6: Alertas (42-43)
+    telemetry.alertMessage = FlowSerialReadStringUntil(';');  // [42]
+    telemetry.alertMessage.trim();
+    FlowSerialReadStringUntil(';');  // [43] popupMessage
+
+    // BLOCO 7: Arduino LEDs (44-47)
+    FlowSerialReadStringUntil(';');  // [44] rpmPercent2
+    telemetry.spotterLeft = FlowSerialReadStringUntil(';');   // [45]
+    telemetry.spotterRight = FlowSerialReadStringUntil(';');  // [46]
+    FlowSerialReadStringUntil(';');  // [47] absActive2
+
+    // BLOCO 8: Desgaste e Ambiente (48-61) — read shiftLight, DRS, skip rest
+    for (int i = 0; i < 9; i++) FlowSerialReadStringUntil(';');  // [48-56]
+    telemetry.shiftLight = FlowSerialReadStringUntil(';');     // [57]
+    telemetry.drsAvailable = FlowSerialReadStringUntil(';');   // [58]
+    telemetry.drsActive = FlowSerialReadStringUntil(';');      // [59]
+    FlowSerialReadStringUntil(';');  // [60] kersLevel
+    FlowSerialReadStringUntil(';');  // [61] turboBoost
+
+    // BLOCO 9: 499P (62-67) — skip all
+    for (int i = 0; i < 6; i++) FlowSerialReadStringUntil(';');
+
+    // BLOCO 10: Track Map (68-71) — skip all
+    for (int i = 0; i < 4; i++) FlowSerialReadStringUntil(';');
+
+    telemetry.hasData = true;
+}
+
+// Generate unique ID from ESP32 eFuse MAC (avoids WiFi dependency)
+String getWheelUniqueId() {
+    uint64_t mac = ESP.getEfuseMac();
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+        (uint8_t)(mac), (uint8_t)(mac >> 8), (uint8_t)(mac >> 16),
+        (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+    return String(macStr);
+}
+
+// Process SimHub commands from USB CDC (Serial)
+void processSimHubCDC() {
+    if (FlowSerialAvailable() > 0) {
+        int r = FlowSerialTimedRead();
+        if (r == SH_MESSAGE_HEADER) {
+            lastSimhubActivity = millis();
+            int cmd = FlowSerialTimedRead();
+
+            // Protection: skip if command is ARQ re-read
+            if (cmd == 0x01) return;
+
+            switch (cmd) {
+                case '1': {  // Hello
+                    FlowSerialTimedRead();  // Read trailer
+                    delay(10);
+                    char v = SIMHUB_VERSION;
+                    FlowSerialPrint(v);
+                    FlowSerialFlush();
+                    DBG("[SIMHUB] Hello handshake OK");
+                    break;
+                }
+                case '0': {  // Features
+                    delay(10);
+                    FlowSerialPrint("NIP\n");
+                    FlowSerialFlush();
+                    break;
+                }
+                case 'N': {  // Device Name
+                    FlowSerialPrint(DEVICE_NAME);
+                    FlowSerialPrint("\n");
+                    FlowSerialFlush();
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                case 'I': {  // Unique ID
+                    String uid = getWheelUniqueId();
+                    FlowSerialPrint(uid);
+                    FlowSerialPrint("\n");
+                    FlowSerialFlush();
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                case '4': {  // RGB LED Count
+                    FlowSerialWrite((byte)(WS2812_LED_COUNT));
+                    FlowSerialFlush();
+                    break;
+                }
+                case '6': {  // RGB LED Data
+                    simhubReadLEDs();
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                case 'P': {  // Custom Protocol Data
+                    simhubReadCustomProtocol();
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                case 'A': {  // Acq
+                    FlowSerialWrite(0x03);
+                    FlowSerialFlush();
+                    simhubConnected = true;
+                    break;
+                }
+                case 'J': {  // Buttons Count
+                    FlowSerialWrite((byte)0);
+                    FlowSerialFlush();
+                    break;
+                }
+                case '2': {  // TM1638 Count
+                    FlowSerialWrite((byte)0);
+                    FlowSerialFlush();
+                    break;
+                }
+                case 'B': {  // Simple Modules Count
+                    FlowSerialWrite((byte)0);
+                    FlowSerialFlush();
+                    break;
+                }
+                case 'G': {  // Gear Data
+                    FlowSerialTimedRead();  // Read gear char
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                case '8': {  // Set Baudrate
+                    SetBaudrate();
+                    break;
+                }
+                case 'X': {  // Expanded Commands
+                    String xaction = FlowSerialReadStringUntil(' ', '\n');
+                    if (xaction == "list") {
+                        FlowSerialPrintLn("mcutype");
+                        FlowSerialPrintLn("keepalive");
+                        FlowSerialPrintLn();
+                        FlowSerialFlush();
+                    } else if (xaction == "mcutype") {
+                        FlowSerialPrint((char)SH_SIGNATURE_0);
+                        FlowSerialPrint((char)SH_SIGNATURE_1);
+                        FlowSerialPrint((char)SH_SIGNATURE_2);
+                        FlowSerialFlush();
+                    }
+                    FlowSerialWrite(0x15);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+
+    // Detect SimHub disconnect (no activity for SIMHUB_TIMEOUT_MS)
+    if (simhubConnected && (millis() - lastSimhubActivity) > SIMHUB_TIMEOUT_MS) {
+        simhubConnected = false;
+        simhubLedControl = false;
+        telemetry.hasData = false;
+        DBG("[SIMHUB] Connection timeout — switched to idle mode");
+    }
+}
+
+// ================================
 // ENCODERS
 // ================================
 struct EncoderState {
@@ -514,6 +1130,10 @@ int32_t  clutchRawBFiltered = 0;
 static const bool HALL_RAW_DEBUG = true;
 static const unsigned long HALL_RAW_DEBUG_MS = 100;
 unsigned long lastHallRawDebugMs = 0;
+
+// Hall sensor presence detection (tested at boot via ADC variance)
+bool hallAConnected = false;
+bool hallBConnected = false;
 
 // ================================
 // MFC MENU (Adjustable Mode)
@@ -636,12 +1256,14 @@ void sendGamepad() {
 
 
 void uartSend(const char* cat, const char* func, const char* val) {
+    if (roundWheelMode) return;  // No WT32 in round wheel mode
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "$%s:%s:%s\n", cat, func, val);
     ButtonBoxSerial.print(buffer);
 }
 
 void uartSendInt(const char* cat, const char* func, int value) {
+    if (roundWheelMode) return;  // No WT32 in round wheel mode
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "$%s:%s:%d\n", cat, func, value);
     ButtonBoxSerial.print(buffer);
@@ -657,6 +1279,11 @@ unsigned long uartPingSentAtMs = 0;
 unsigned long uartLastPingAtMs = 0;
 static const unsigned long UART_PING_INTERVAL_MS = 1500;
 static const unsigned long UART_PING_TIMEOUT_MS = 1200;
+
+// WT32 connection state: tracks whether WT32 responds to PINGs
+bool wt32Connected = false;
+uint8_t wt32PingFailCount = 0;
+static const uint8_t WT32_MAX_PING_FAILS = 3;  // Disconnect after 3 consecutive timeouts
 
 void handleWt32UartRx() {
     while (ButtonBoxSerial.available()) {
@@ -675,6 +1302,11 @@ void handleWt32UartRx() {
                         unsigned long rtt = millis() - uartPingSentAtMs;
                         DBGF("[UART] PONG seq=%u RTT=%lums", (unsigned)seq, rtt);
                         uartPingPendingSeq = 0;
+                        if (!wt32Connected) {
+                            wt32Connected = true;
+                            DBG("[UART] WT32 connected!");
+                        }
+                        wt32PingFailCount = 0;
                     } else {
                         DBGF("[UART] PONG unexpected seq=%u pending=%u",
                              (unsigned)seq,
@@ -699,6 +1331,11 @@ void uartRoundtripTask() {
         if ((now - uartPingSentAtMs) >= UART_PING_TIMEOUT_MS) {
             DBGF("[UART] PING timeout seq=%u", (unsigned)uartPingPendingSeq);
             uartPingPendingSeq = 0;
+            wt32PingFailCount++;
+            if (wt32Connected && wt32PingFailCount >= WT32_MAX_PING_FAILS) {
+                wt32Connected = false;
+                DBG("[UART] WT32 disconnected (3 timeouts)");
+            }
         }
         return;
     }
@@ -1017,6 +1654,12 @@ void handleMfcRotate(int8_t step) {
             snprintf(buf, sizeof(buf), "%d", brightnessValue);
             uartSend("BRIGHT", "VAL", buf);
             ledApplyBrightness(brightnessValue);
+            // Round wheel: update MAX7219 intensity and WS2812 luminance
+            if (roundWheelMode) {
+                uint8_t max7219Int = map(constrain(brightnessValue, 15, 255), 15, 255, 0, 15);
+                max7219SetIntensity(max7219Int);
+                ws2812Strip.SetLuminance(constrain(brightnessValue, 0, 255));
+            }
         } else if (item == MFC_PAGE) {
             pageValue += step;
             if (pageValue < 0) pageValue = 6;
@@ -1203,11 +1846,61 @@ static uint16_t hallReadMedian(uint8_t pin) {
     return buf[HALL_MEDIAN_SAMPLES / 2];
 }
 
+// Detect if a hall sensor is physically connected by reading ADC variance.
+// A real sensor outputs a stable voltage (~1.0-3.0V) → low variance.
+// A floating pin bounces across the full ADC range → high variance.
+// Also checks if readings are stuck at rail (0 or 4095) = no sensor.
+static bool detectHallPresence(uint8_t pin, const char* label) {
+    static const uint8_t DETECT_SAMPLES = 32;
+    static const uint16_t VARIANCE_THRESHOLD = 50000;  // ~224 count stdev
+    static const uint16_t RAIL_LOW = 50;
+    static const uint16_t RAIL_HIGH = 4045;
+
+    uint32_t sum = 0;
+    uint32_t sumSq = 0;
+    uint16_t minVal = 4095;
+    uint16_t maxVal = 0;
+    uint16_t samples[DETECT_SAMPLES];
+
+    for (uint8_t i = 0; i < DETECT_SAMPLES; i++) {
+        samples[i] = analogRead(pin);
+        sum += samples[i];
+        if (samples[i] < minVal) minVal = samples[i];
+        if (samples[i] > maxVal) maxVal = samples[i];
+        delayMicroseconds(200);  // Spread reads over ~6ms
+    }
+
+    uint16_t mean = sum / DETECT_SAMPLES;
+    for (uint8_t i = 0; i < DETECT_SAMPLES; i++) {
+        int32_t diff = (int32_t)samples[i] - (int32_t)mean;
+        sumSq += diff * diff;
+    }
+    uint32_t variance = sumSq / DETECT_SAMPLES;
+
+    // Check: stuck at rail?
+    bool atRail = (mean < RAIL_LOW || mean > RAIL_HIGH);
+    // Check: high variance = floating pin
+    bool highVariance = (variance > VARIANCE_THRESHOLD);
+    // Check: very wide min-max spread
+    bool wideSpread = ((maxVal - minVal) > 500);
+
+    bool connected = !atRail && !highVariance && !wideSpread;
+
+    DBGF("[HALL] %s detect: mean=%u min=%u max=%u var=%lu spread=%u → %s",
+        label, mean, minVal, maxVal, (unsigned long)variance,
+        maxVal - minVal, connected ? "CONNECTED" : "NOT CONNECTED");
+
+    return connected;
+}
+
 void updateClutches() {
+    // Skip entirely if no hall sensors connected — axes stay at 0
+    if (!hallAConnected && !hallBConnected) return;
+
     // Read Hall with median filter; extra delay between channels prevents crosstalk
-    uint16_t rawA = hallReadMedian(HALL_A_PIN);
+    uint16_t rawA = hallAConnected ? hallReadMedian(HALL_A_PIN) : (uint16_t)((clutchCfg.hallMinA + clutchCfg.hallMaxA) / 2);
     delayMicroseconds(50);
-    uint16_t rawB = hallReadMedian(HALL_B_PIN);
+    uint16_t rawB = hallBConnected ? hallReadMedian(HALL_B_PIN) : (uint16_t)((clutchCfg.hallMinB + clutchCfg.hallMaxB) / 2);
 
     if (HALL_RAW_DEBUG) {
         unsigned long nowMs = millis();
@@ -1632,6 +2325,17 @@ void setup() {
     gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);  // same for Hall B
     DBG("[ADC] Hall sensor pins configured (GPIO1=HallA, GPIO2=HallB, 12-bit, 11dB, pull-up disabled)");
 
+    // Detect hall sensor presence (variance test)
+    hallAConnected = detectHallPresence(HALL_A_PIN, "HallA(GPIO1)");
+    hallBConnected = detectHallPresence(HALL_B_PIN, "HallB(GPIO2)");
+    if (!hallAConnected && !hallBConnected) {
+        DBG("[HALL] No hall sensors detected — clutch axes locked at 0");
+    } else {
+        DBGF("[HALL] HallA=%s HallB=%s",
+            hallAConnected ? "OK" : "absent",
+            hallBConnected ? "OK" : "absent");
+    }
+
     DBG("[I2C] Setting up MCP23017 button matrix...");
     setupButtonMatrix();
     if (mcpAvailable) {
@@ -1648,8 +2352,26 @@ void setup() {
     setupEncoders();
     DBG("[BOOT] Encoders OK");
 
+    // Round wheel mode: auto-detect based on PCA9685 absence
+    roundWheelMode = !ledAvailable;
+    if (roundWheelMode) {
+        DBG("[MODE] Round wheel mode ACTIVE (no PCA9685 detected)");
+        DBG("[MODE] Initializing MAX7219 + WS2812 + SimHub CDC...");
+        setupMax7219();
+        setupWs2812();
+        // Apply saved brightness to MAX7219 and WS2812
+        uint8_t max7219Int = map(constrain(brightnessValue, 15, 255), 15, 255, 0, 15);
+        max7219SetIntensity(max7219Int);
+        ws2812Strip.SetLuminance(constrain(brightnessValue, 0, 255));
+        DBG("[MODE] Round wheel peripherals initialized OK");
+    } else {
+        DBG("[MODE] F1 wheel mode (PCA9685 detected, UART to WT32)");
+    }
+
     uartSend("SYS", "BOOT", DEVICE_NAME);
-    DBG("[UART] Roundtrip enabled: TX=GPIO43 RX=GPIO11");
+    if (!roundWheelMode) {
+        DBG("[UART] Roundtrip enabled: TX=GPIO43 RX=GPIO11");
+    }
     DBG("========================================");
     DBG(">>> BOOT COMPLETE - WHEEL RUNNING <<<");
     DBG("========================================");
@@ -1688,8 +2410,11 @@ void handleMultimediaButtons() {
 }
 
 void loop() {
-    handleWt32UartRx();
-    uartRoundtripTask();
+    // UART to WT32: only in F1 mode (round wheel has no WT32)
+    if (!roundWheelMode) {
+        handleWt32UartRx();
+        uartRoundtripTask();
+    }
 
     // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
     scanEncoders();
@@ -1704,4 +2429,11 @@ void loop() {
     releaseVirtualButtonPulses();
     updateClutches();
     handleShiftClutchCombo();
+
+    // Round wheel mode: SimHub CDC protocol + local display
+    if (roundWheelMode) {
+        processSimHubCDC();
+        updateMax7219Display();
+        updateWs2812LEDs();
+    }
 }
