@@ -255,6 +255,7 @@ private:
 	DashboardPage currentPage = PAGE_RACE;
 	DashboardPage lastPage = PAGE_RACE;  // Track previous page to detect page changes
 	unsigned long lastTouchTime = 0;
+	bool prevTouched = false;  // Rising-edge detection: prevents phantom stuck-touch from cycling pages
 	static const unsigned long TOUCH_DEBOUNCE_MS = 500;  // Debounce time between page changes
 
 	// Helper function to safely use display
@@ -819,7 +820,11 @@ public:
 		// Check for touch input to change pages
 		if (touchInitialized && hasReceivedData) {
 			TouchPoint touch = readTouch();
-			if (touch.touched && (millis() - lastTouchTime) > TOUCH_DEBOUNCE_MS) {
+			// Rising-edge detection: only act on new touch (finger down), not held/phantom touch.
+			// A stuck phantom touch that never changes state fires exactly once, then stops.
+			bool isNewTouch = touch.touched && !prevTouched;
+			prevTouched = touch.touched;
+			if (isNewTouch && (millis() - lastTouchTime) > TOUCH_DEBOUNCE_MS) {
 				lastTouchTime = millis();
 
 				// Display is landscape (rotation=1). The FT6336U reports in portrait coordinates:
@@ -856,6 +861,10 @@ public:
 			#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
 			updateLoadingAnimation();
 			#endif
+			// Still render UART popups from ButtonBox even before SimHub connects
+			if (popupFromUart && popupMessage.length() > 0) {
+				drawAlert();
+			}
 			return;
 		}
 

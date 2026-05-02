@@ -174,11 +174,42 @@ class HidTester:
         return out
 
     def run_live_monitor(self) -> None:
-        print("Monitor ativo. Ctrl+C para sair.")
+        print("Monitor ativo — pressione botões/encoders/halls. Ctrl+C para sair.\n")
+        pressed: Set[int] = set()
         try:
             while True:
-                self.poll_events(verbose=True)
-                time.sleep(0.01)
+                for event in pygame.event.get():
+                    if event.type == pygame.JOYBUTTONDOWN:
+                        raw = event.button + 1
+                        mapped = self._map_button_id(raw)
+                        label = BUTTON_LABELS.get(mapped, "(sem rótulo)")
+                        pressed.add(raw)
+                        print(f"[BTN {mapped:02d}] ▼ PRESS   {label}")
+                    elif event.type == pygame.JOYBUTTONUP:
+                        raw = event.button + 1
+                        mapped = self._map_button_id(raw)
+                        label = BUTTON_LABELS.get(mapped, "(sem rótulo)")
+                        pressed.discard(raw)
+                        print(f"[BTN {mapped:02d}] ▲ release {label}")
+                    elif event.type == pygame.JOYAXISMOTION:
+                        if not self.no_axis:
+                            axis_id = event.axis
+                            if axis_id in self.hide_axes:
+                                continue
+                            if self.show_axes is not None and axis_id not in self.show_axes:
+                                continue
+                            value = float(event.value)
+                            prev = self.state.axes.get(axis_id, 0.0)
+                            self.state.axes[axis_id] = value
+                            if abs(value - prev) >= self.axis_change and (abs(value) >= self.deadzone or abs(prev) >= self.deadzone):
+                                print(f"[AXIS {axis_id}] {value:+.3f}")
+                    elif event.type == pygame.JOYHATMOTION:
+                        hat = tuple(event.value)
+                        self.state.hat = hat
+                        dirs = {(0,1):"UP",(0,-1):"DOWN",(-1,0):"LEFT",(1,0):"RIGHT",(0,0):"CENTER"}
+                        name = dirs.get(hat, str(hat))
+                        print(f"[HAT ] {name}")
+                time.sleep(0.005)
         except KeyboardInterrupt:
             print("\nMonitor finalizado.")
 
@@ -207,25 +238,32 @@ class HidTester:
             time.sleep(0.01)
         return first, last, low, high
 
+    def _drain_events(self) -> None:
+        """Descarta eventos acumulados antes de começar a escutar um novo botão."""
+        pygame.event.pump()
+        pygame.event.clear()
+
     def guided_test(self) -> None:
         print("\n=== TESTE GUIADO ===")
-        print("Se algo não responder: revise solda, diodo, continuidade e mapeamento de slot.")
+        print("Aperte cada botão quando solicitado. Sem precisar teclar Enter.")
+        print("Timeout de 12s por botão. Ctrl+C para cancelar.\n")
         if self.label_offset != 0 or self.label_divisor != 1:
             print(f"[INFO] Mapeamento ativo: slot = (BTN bruto {self.label_offset:+d}) / {self.label_divisor}")
 
         ok_buttons = 0
         fail_buttons = []
 
-        print("\n[1/4] Botões (matriz)")
+        print("[1/4] Botões (matriz)")
         for bid in GUIDED_BUTTON_ORDER:
             label = BUTTON_LABELS.get(bid, "(sem rótulo)")
             raw_expected = (bid * self.label_divisor) - self.label_offset
-            input(f"- Pressione {label} [BTN {bid}] e tecle Enter para armar...")
+            self._drain_events()
+            print(f"  → Pressione {label} [BTN {bid}]...", end=" ", flush=True)
             if self._wait_for_button_press(raw_expected, timeout_s=12.0):
-                print(f"  ✓ BTN {bid} detectado")
+                print(f"✓")
                 ok_buttons += 1
             else:
-                print(f"  ✗ BTN {bid} NÃO detectado")
+                print(f"✗ (timeout)")
                 fail_buttons.append((bid, label))
 
         print("\n[2/4] 5-way direções (HAT)")
@@ -238,7 +276,8 @@ class HidTester:
         ok_hat = 0
         fail_hat = []
         for expected, name in hat_steps:
-            input(f"- Mova o 5-way para {name} e tecle Enter para armar...")
+            self._drain_events()
+            print(f"  → Mova o 5-way para {name}...", end=" ", flush=True)
             found = False
             end = time.time() + 10.0
             while time.time() < end:
@@ -251,10 +290,10 @@ class HidTester:
                     break
                 time.sleep(0.01)
             if found:
-                print(f"  ✓ HAT {name} detectado")
+                print(f"✓")
                 ok_hat += 1
             else:
-                print(f"  ✗ HAT {name} NÃO detectado")
+                print(f"✗ (timeout)")
                 fail_hat.append(name)
 
         print("\n[3/4] Encoders (sentido) — gire no sentido horário")
@@ -264,7 +303,8 @@ class HidTester:
                 encoder_results.append((label, "N/A", "eixo não existe no device"))
                 print(f"  - {label}: N/A (axis {axis_id} não existe)")
                 continue
-            input(f"- {label}: gire HORÁRIO por ~2s e tecle Enter para iniciar janela...")
+            self._drain_events()
+            print(f"  → {label}: gire HORÁRIO agora (4s)...", end=" ", flush=True)
             first, last, low, high = self._capture_axis_window(axis_id, seconds=4.0)
             span = high - low
             net = last - first
@@ -276,7 +316,7 @@ class HidTester:
                 status = "OK"
                 msg = f"movimento detectado, delta líquido {direction} (span={span:.3f}, net={net:+.3f})"
             encoder_results.append((label, status, msg))
-            print(f"  {('✓' if status == 'OK' else '✗')} {label}: {msg}")
+            print(f"{'✓' if status == 'OK' else '✗'} {msg}")
 
         print("\n[4/4] Halls")
         hall_results = []
@@ -285,15 +325,16 @@ class HidTester:
                 hall_results.append((label, "N/A", "eixo não existe no device"))
                 print(f"  - {label}: N/A (axis {axis_id} não existe)")
                 continue
-            input(f"- {label}: mova a embreagem do mínimo ao máximo por ~2s e tecle Enter...")
+            self._drain_events()
+            print(f"  → {label}: mova embreagem do mínimo ao máximo agora (4s)...", end=" ", flush=True)
             first, last, low, high = self._capture_axis_window(axis_id, seconds=4.0)
             span = high - low
             if span < 0.20:
                 hall_results.append((label, "FALHA", f"variação baixa (span={span:.3f})"))
-                print(f"  ✗ {label}: variação baixa (span={span:.3f})")
+                print(f"✗ variação baixa (span={span:.3f})")
             else:
                 hall_results.append((label, "OK", f"variação boa (span={span:.3f}, min={low:+.3f}, max={high:+.3f})"))
-                print(f"  ✓ {label}: variação boa (span={span:.3f})")
+                print(f"✓ variação boa (span={span:.3f})")
 
         print("\n=== RESUMO ===")
         print(f"Botões: {ok_buttons}/{len(GUIDED_BUTTON_ORDER)} OK")

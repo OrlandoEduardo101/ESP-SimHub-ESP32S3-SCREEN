@@ -1256,14 +1256,12 @@ void sendGamepad() {
 
 
 void uartSend(const char* cat, const char* func, const char* val) {
-    if (roundWheelMode) return;  // No WT32 in round wheel mode
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "$%s:%s:%s\n", cat, func, val);
     ButtonBoxSerial.print(buffer);
 }
 
 void uartSendInt(const char* cat, const char* func, int value) {
-    if (roundWheelMode) return;  // No WT32 in round wheel mode
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "$%s:%s:%d\n", cat, func, value);
     ButtonBoxSerial.print(buffer);
@@ -2410,11 +2408,9 @@ void handleMultimediaButtons() {
 }
 
 void loop() {
-    // UART to WT32: only in F1 mode (round wheel has no WT32)
-    if (!roundWheelMode) {
-        handleWt32UartRx();
-        uartRoundtripTask();
-    }
+    // UART to WT32: always active (round wheel just sends to nothing, harmless)
+    handleWt32UartRx();
+    uartRoundtripTask();
 
     // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
     scanEncoders();
