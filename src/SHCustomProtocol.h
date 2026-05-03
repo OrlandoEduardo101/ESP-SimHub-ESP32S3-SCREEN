@@ -170,6 +170,15 @@ private:
 	unsigned long alertStartTime = 0;
 	bool alertWasShowing = false;  // Track if alert was displayed to trigger clear
 	bool needsFullRedraw = false;  // Flag to trigger full screen redraw after alert
+	bool timingFrameDrawn = false; // Flag: timing page static frame already drawn
+	bool telemFrameDrawn  = false;
+	bool advFrameDrawn    = false;
+	bool stratFrameDrawn  = false;
+	bool lapsFrameDrawn   = false;
+	bool mapFrameDrawn    = false;
+	bool mapTrackDrawn    = false;
+	String mapLastTrackId = "";
+	bool p499FrameDrawn   = false;
 	static const unsigned long ALERT_DURATION_MS = 3000;  // Show alert for 3 seconds
 	bool popupFromUart = false;
 	unsigned long popupFromUartUntil = 0;
@@ -280,11 +289,19 @@ private:
 
 	// Reset draw cache when changing pages
 	void resetDrawCache() {
-		prev_gear = "";  // Force gear redraw
-		prev_rpmPercent = -1;  // Force RPM redraw
-		// Clear prevData map to force all cells to redraw
+		prev_gear = "";
+		prev_rpmPercent = -1;
 		prevData.clear();
 		prevColor.clear();
+		timingFrameDrawn = false;
+		telemFrameDrawn  = false;
+		advFrameDrawn    = false;
+		stratFrameDrawn  = false;
+		lapsFrameDrawn   = false;
+		mapFrameDrawn    = false;
+		mapTrackDrawn    = false;
+		mapLastTrackId   = "";
+		p499FrameDrawn   = false;
 	}
 
 	// Navigate to next page
@@ -1094,448 +1111,648 @@ public:
 	}
 
 	void drawTimingPageContent() {
-		// PAGE 2: Timing/Lap Analysis - with visual layout (full width)
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 20, 60));  // Header background
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(3);
-		gfx->setCursor(10, 10);
-		gfx->print("TIMING");
+		// ── Palette ──
+		const uint16_t GOLD     = RGB565(220, 172, 0);
+		const uint16_t GOLD_DIM = RGB565(120, 96, 0);
+		const uint16_t TEAL     = RGB565(0, 200, 220);
+		const uint16_t TEAL_DIM = RGB565(0, 100, 115);
+		const uint16_t LIME     = RGB565(60, 230, 80);
+		const uint16_t LIME_DIM = RGB565(30, 120, 45);
+		const uint16_t BG_HDR   = RGB565(6, 8, 22);
+		const uint16_t BG_C1    = RGB565(16, 13, 4);
+		const uint16_t BG_C2    = RGB565(4, 14, 18);
+		const uint16_t BG_C3    = RGB565(4, 16, 6);
+		const uint16_t SEP      = RGB565(22, 20, 30);
 
-		// Best lap box
-		gfx->drawRect(5, 55, SCREEN_WIDTH - 10, 70, YELLOW);
-		gfx->fillRect(5, 55, SCREEN_WIDTH - 10, 25, YELLOW);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 62);
-		gfx->print("BEST LAP");
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(2);
-		gfx->setCursor(20, 82);
-		gfx->print(bestLapTime);
+		// ── Layout constants (physical height = SCREEN_HEIGHT+48 = 320) ──
+		// Header 0..45 (46px) | C1 46..136 (90px) | C2 137..227 (90px) | C3 228..319 (91px)
+		const int FH   = SCREEN_HEIGHT + 48; // 320
+		const int C1_Y = 46,  C1_H = 90;
+		const int C2_Y = 137, C2_H = 90;
+		const int C3_Y = 228, C3_H = FH - C3_Y; // 91
 
-		// Last lap box
-		gfx->drawRect(5, 135, SCREEN_WIDTH - 10, 70, CYAN);
-		gfx->fillRect(5, 135, SCREEN_WIDTH - 10, 25, CYAN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 142);
-		gfx->print("LAST LAP");
-		gfx->setTextColor(CYAN);
-		gfx->setTextSize(2);
-		gfx->setCursor(20, 162);
-		gfx->print(lastLapTime);
+		// ── Static frame: draw only once per page switch ──
+		if (!timingFrameDrawn) {
+			gfx->fillScreen(BLACK);
 
-		// Current lap box
-		gfx->drawRect(5, 215, SCREEN_WIDTH - 10, 55, GREEN);
-		gfx->fillRect(5, 215, SCREEN_WIDTH - 10, 25, GREEN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 222);
-		gfx->print("CURRENT LAP");
-		gfx->setTextColor(GREEN);
-		gfx->setTextSize(2);
-		gfx->setCursor(20, 242);
-		gfx->print(currentLapTime);
+			// Header
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 46, BG_HDR);
+			gfx->fillRect(0, 44, SCREEN_WIDTH, 2, GOLD);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(14, 9); gfx->print("TIMING");
 
-		// Delta indicator on the right
-		gfx->drawRect(SCREEN_WIDTH - 75, 55, 70, 215, WHITE);
-		gfx->fillRect(SCREEN_WIDTH - 75, 55, 70, 25, sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(SCREEN_WIDTH - 70, 62);
-		gfx->print("DELTA");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(1);
-		gfx->setCursor(SCREEN_WIDTH - 70, 90);
-		gfx->print(sessionBestLiveDeltaSeconds);
+			// Card 1 — BEST LAP
+			gfx->fillRect(0, C1_Y, SCREEN_WIDTH, C1_H, BG_C1);
+			gfx->fillRect(0, C1_Y, 5, C1_H, GOLD);
+			gfx->setTextColor(GOLD_DIM); gfx->setTextSize(1);
+			gfx->setCursor(14, C1_Y + 5); gfx->print("BEST LAP");
+			gfx->fillRect(0, C1_Y + C1_H - 1, SCREEN_WIDTH, 2, SEP);
+
+			// Card 2 — LAST LAP
+			gfx->fillRect(0, C2_Y, SCREEN_WIDTH, C2_H, BG_C2);
+			gfx->fillRect(0, C2_Y, 5, C2_H, TEAL);
+			gfx->setTextColor(TEAL_DIM); gfx->setTextSize(1);
+			gfx->setCursor(14, C2_Y + 5); gfx->print("LAST LAP");
+			gfx->fillRect(0, C2_Y + C2_H - 1, SCREEN_WIDTH, 2, SEP);
+
+			// Card 3 — CURRENT LAP
+			gfx->fillRect(0, C3_Y, SCREEN_WIDTH, C3_H, BG_C3);
+			gfx->fillRect(0, C3_Y, 5, C3_H, LIME);
+			gfx->setTextColor(LIME_DIM); gfx->setTextSize(1);
+			gfx->setCursor(14, C3_Y + 5); gfx->print("CURRENT LAP");
+
+			timingFrameDrawn = true;
+		}
+
+		// ── Delta + POS (header right side) ──
+		bool deltaIsNeg = sessionBestLiveDeltaSeconds.startsWith("-");
+		uint16_t deltaCol = deltaIsNeg ? LIME : RED;
+		if (prevData["t_delta"] != sessionBestLiveDeltaSeconds || prevData["t_delta_c"] != (deltaIsNeg ? "n" : "p")) {
+			gfx->fillRect(SCREEN_WIDTH - 200, 2, 198, 42, BG_HDR);
+			if (position.length() > 0 && position != "0") {
+				gfx->setTextColor(RGB565(140, 140, 160)); gfx->setTextSize(1);
+				gfx->setCursor(SCREEN_WIDTH - 52, 6); gfx->print("POS");
+				gfx->setTextColor(WHITE); gfx->setTextSize(2);
+				gfx->setCursor(SCREEN_WIDTH - 54, 18); gfx->print("P"); gfx->print(position);
+			}
+			int dxLabel = (position.length() > 0 && position != "0") ? SCREEN_WIDTH - 185 : SCREEN_WIDTH - 110;
+			gfx->setTextColor(RGB565(120, 120, 140)); gfx->setTextSize(1);
+			gfx->setCursor(dxLabel, 6); gfx->print("DELTA");
+			gfx->setTextColor(deltaCol); gfx->setTextSize(2);
+			gfx->setCursor(dxLabel - 4, 18); gfx->print(sessionBestLiveDeltaSeconds);
+			prevData["t_delta"] = sessionBestLiveDeltaSeconds;
+			prevData["t_delta_c"] = deltaIsNeg ? "n" : "p";
+			prevData["t_pos"] = position;
+		}
+
+		// ── Best lap ── textSize 5 = 40px, centred vertically in 90px card ──
+		if (prevData["t_best"] != bestLapTime) {
+			gfx->fillRect(6, C1_Y + 16, SCREEN_WIDTH - 7, 64, BG_C1);
+			gfx->setTextColor(GOLD); gfx->setTextSize(5);
+			gfx->setCursor(14, C1_Y + 22); gfx->print(bestLapTime);
+			prevData["t_best"] = bestLapTime;
+		}
+
+		// ── Last lap ── textSize 5
+		if (prevData["t_last"] != lastLapTime) {
+			gfx->fillRect(6, C2_Y + 16, SCREEN_WIDTH - 7, 64, BG_C2);
+			gfx->setTextColor(TEAL); gfx->setTextSize(5);
+			gfx->setCursor(14, C2_Y + 22); gfx->print(lastLapTime);
+			prevData["t_last"] = lastLapTime;
+		}
+
+		// ── Current lap ── textSize 5
+		if (prevData["t_cur"] != currentLapTime) {
+			gfx->fillRect(6, C3_Y + 16, SCREEN_WIDTH - 7, 64, BG_C3);
+			gfx->setTextColor(LIME); gfx->setTextSize(5);
+			gfx->setCursor(14, C3_Y + 22); gfx->print(currentLapTime);
+			prevData["t_cur"] = currentLapTime;
+		}
 	}
 
 	void drawTelemetryPageContent() {
-		// PAGE 3: Telemetry/Vehicle Status - with visual boxes (full width)
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 20));  // Header background
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(3);
-		gfx->setCursor(10, 10);
-		gfx->print("TELEMETRY");
+		const uint16_t ORNG   = RGB565(230, 130,  0);
+		const uint16_t ORNG_D = RGB565( 80,  45,  0);
+		const uint16_t YLW    = RGB565(230, 210,  0);
+		const uint16_t YLW_D  = RGB565( 90,  82,  0);
+		const uint16_t BLU    = RGB565( 60, 140, 240);
+		const uint16_t BLU_D  = RGB565( 18,  45,  90);
+		const uint16_t RD     = RGB565(220,  50,  50);
+		const uint16_t RD_D   = RGB565( 80,  15,  15);
+		const uint16_t TCL    = RGB565(  0, 200, 210);
+		const uint16_t TCL_D  = RGB565(  0,  70,  80);
+		const uint16_t BG_HDR = RGB565(  6,   8,  22);
+		const uint16_t BG_SPD = RGB565( 18,   9,   0);
+		const uint16_t BG_TC  = RGB565( 18,  14,   0);
+		const uint16_t BG_ABS = RGB565(  5,  10,  36);
+		const uint16_t BG_BRK = RGB565( 20,   5,   5);
+		const uint16_t BG_TYR = RGB565(  0,  10,  12);
+		const uint16_t SEP    = RGB565( 22,  20,  30);
 
-		// Speed - Large display (left side)
-		int speedBoxWidth = (SCREEN_WIDTH - 20) / 2;
-		gfx->drawRect(5, 55, speedBoxWidth, 80, YELLOW);
-		gfx->fillRect(5, 55, speedBoxWidth, 25, YELLOW);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 62);
-		gfx->print("SPEED");
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(3);
-		gfx->setCursor(20, 75);
-		gfx->print(speed);
+		if (!telemFrameDrawn) {
+			gfx->fillScreen(BLACK);
 
-		// TC/ABS indicators side by side (right side)
-		int tcBoxWidth = (SCREEN_WIDTH - 25) / 2;
-		// TC Box
-		gfx->drawRect(5 + speedBoxWidth + 5, 55, tcBoxWidth, 35, ORANGE);
-		gfx->fillRect(5 + speedBoxWidth + 5, 55, tcBoxWidth, 20, ORANGE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + speedBoxWidth + 5, 62);
-		gfx->print("TC");
-		gfx->setTextColor(ORANGE);
-		gfx->setTextSize(2);
-		gfx->setCursor(20 + speedBoxWidth + 5, 70);
-		gfx->print(tcLevel);
+			// Header
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 46, BG_HDR);
+			gfx->fillRect(0, 44, SCREEN_WIDTH, 2, ORNG);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(14, 9); gfx->print("TELEMETRY");
+			gfx->setTextColor(RGB565(120, 120, 140)); gfx->setTextSize(1);
+			gfx->setCursor(SCREEN_WIDTH - 92, 8); gfx->print("GEAR");
 
-		// ABS Box
-		gfx->drawRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 35, BLUE);
-		gfx->fillRect(5 + speedBoxWidth + 5, 95, tcBoxWidth, 20, BLUE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + speedBoxWidth + 5, 102);
-		gfx->print("ABS");
-		gfx->setTextColor(BLUE);
-		gfx->setTextSize(2);
-		gfx->setCursor(20 + speedBoxWidth + 5, 110);
-		gfx->print(absLevel);
+			// Layout: FH=320 | Header 0..45 | Speed/TC/ABS 46..134 | Brake 135..188 | Tyres 189..319
+			const int FH=320, SPD_Y=46, SPD_H=88, BRK_Y=135, BRK_H=53, TYR_Y=189;
+			const int TC_X=302, TC_H=43; // TC occupies upper half of SPD section, ABS lower
 
-		// Brake Box (full width)
-		gfx->drawRect(5, 145, SCREEN_WIDTH - 10, 50, RED);
-		gfx->fillRect(5, 145, SCREEN_WIDTH - 10, 25, RED);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 152);
-		gfx->print("BRAKE PRESSURE");
-		gfx->setTextColor(RED);
-		gfx->setTextSize(2);
-		gfx->setCursor(30, 165);
-		gfx->print(brake);
-		gfx->print("%");
+			// Card SPEED (x=0..TC_X-2, y=SPD_Y..SPD_Y+SPD_H)
+			gfx->fillRect(0, SPD_Y, TC_X - 2, SPD_H, BG_SPD);
+			gfx->fillRect(0, SPD_Y, 5, SPD_H, ORNG);
+			gfx->setTextColor(ORNG_D); gfx->setTextSize(1);
+			gfx->setCursor(14, SPD_Y + 5); gfx->print("SPEED");
 
-		// Tyre pressures grid (full width, split in 2)
-		int tyreBoxWidth = (SCREEN_WIDTH - 15) / 2;
-		gfx->drawRect(5, 205, tyreBoxWidth, 65, CYAN);
-		gfx->fillRect(5, 205, tyreBoxWidth, 20, CYAN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 212);
-		gfx->print("TYRE FL/RL");
-		gfx->setTextColor(CYAN);
-		gfx->setCursor(10, 230);
-		gfx->print("FL: ");
-		gfx->print(tyrePressureFrontLeft);
-		gfx->setCursor(10, 245);
-		gfx->print("RL: ");
-		gfx->print(tyrePressureRearLeft);
+			// Card TC (x=TC_X..479, y=SPD_Y..SPD_Y+TC_H)
+			gfx->fillRect(TC_X, SPD_Y, SCREEN_WIDTH - TC_X, TC_H, BG_TC);
+			gfx->fillRect(TC_X, SPD_Y, 5, TC_H, YLW);
+			gfx->setTextColor(YLW_D); gfx->setTextSize(1);
+			gfx->setCursor(TC_X + 14, SPD_Y + 5); gfx->print("TC");
 
-		gfx->drawRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 65, CYAN);
-		gfx->fillRect(5 + tyreBoxWidth + 5, 205, tyreBoxWidth, 20, CYAN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + tyreBoxWidth + 5, 212);
-		gfx->print("TYRE FR/RR");
-		gfx->setTextColor(CYAN);
-		gfx->setCursor(10 + tyreBoxWidth + 5, 230);
-		gfx->print("FR: ");
-		gfx->print(tyrePressureFrontRight);
-		gfx->setCursor(10 + tyreBoxWidth + 5, 245);
-		gfx->print("RR: ");
-		gfx->print(tyrePressureRearRight);
+			// Card ABS (x=TC_X..479, y=SPD_Y+TC_H+1..SPD_Y+SPD_H)
+			int ABS_Y = SPD_Y + TC_H + 1;
+			gfx->fillRect(TC_X, ABS_Y, SCREEN_WIDTH - TC_X, SPD_H - TC_H - 1, BG_ABS);
+			gfx->fillRect(TC_X, ABS_Y, 5, SPD_H - TC_H - 1, BLU);
+			gfx->setTextColor(BLU_D); gfx->setTextSize(1);
+			gfx->setCursor(TC_X + 14, ABS_Y + 5); gfx->print("ABS");
+
+			gfx->drawLine(TC_X - 1, SPD_Y, TC_X - 1, SPD_Y + SPD_H, SEP);
+			gfx->fillRect(0, SPD_Y + SPD_H, SCREEN_WIDTH, 1, SEP);
+
+			// Card BRAKE (full width, y=BRK_Y..BRK_Y+BRK_H)
+			gfx->fillRect(0, BRK_Y, SCREEN_WIDTH, BRK_H, BG_BRK);
+			gfx->fillRect(0, BRK_Y, 5, BRK_H, RD);
+			gfx->setTextColor(RD_D); gfx->setTextSize(1);
+			gfx->setCursor(14, BRK_Y + 5); gfx->print("BRAKE");
+
+			gfx->fillRect(0, BRK_Y + BRK_H, SCREEN_WIDTH, 1, SEP);
+
+			// 4 tyre columns (y=TYR_Y..319, each 120px wide)
+			const int TYR_H_LOCAL = FH - TYR_Y;
+			const char* tyreLabels[4] = {"FL","FR","RL","RR"};
+			for (uint8_t c = 0; c < 4; c++) {
+				int cx = c * 120;
+				gfx->fillRect(cx, TYR_Y, 119, TYR_H_LOCAL, BG_TYR);
+				gfx->fillRect(cx, TYR_Y, 5, TYR_H_LOCAL, TCL);
+				if (c > 0) gfx->drawLine(cx, TYR_Y, cx, FH - 1, SEP);
+				gfx->setTextColor(TCL_D); gfx->setTextSize(1);
+				gfx->setCursor(14 + cx, TYR_Y + 5); gfx->print(tyreLabels[c]);
+				gfx->setCursor(14 + cx, TYR_Y + 68); gfx->print("T:");
+			}
+			telemFrameDrawn = true;
+		}
+
+		// Layout constants (delta renders)
+		const int SPD_Y=46, SPD_H=88, BRK_Y=135, BRK_H=53, TYR_Y=189;
+		const int TC_X=302, TC_H=43;
+		const int ABS_Y = SPD_Y + TC_H + 1;
+
+		// Gear (header)
+		if (prevData["v_gr"] != gear) {
+			gfx->fillRect(SCREEN_WIDTH - 90, 18, 84, 26, BG_HDR);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(SCREEN_WIDTH - 88, 18); gfx->print(gear);
+			prevData["v_gr"] = gear;
+		}
+		// Speed
+		if (prevData["v_sp"] != speed) {
+			gfx->fillRect(6, SPD_Y + 22, TC_X - 8, 56, BG_SPD);
+			gfx->setTextColor(ORNG); gfx->setTextSize(6);
+			gfx->setCursor(14, SPD_Y + 22); gfx->print(speed);
+			prevData["v_sp"] = speed;
+		}
+		// TC
+		if (prevData["v_tc"] != tcLevel) {
+			gfx->fillRect(TC_X + 6, SPD_Y + 14, SCREEN_WIDTH - TC_X - 8, 22, BG_TC);
+			gfx->setTextColor(tcActive == "1" ? WHITE : YLW); gfx->setTextSize(3);
+			gfx->setCursor(TC_X + 14, SPD_Y + 14); gfx->print(tcLevel);
+			prevData["v_tc"] = tcLevel;
+		}
+		// ABS
+		if (prevData["v_ab"] != absLevel) {
+			gfx->fillRect(TC_X + 6, ABS_Y + 14, SCREEN_WIDTH - TC_X - 8, 22, BG_ABS);
+			gfx->setTextColor(absActive == "1" ? WHITE : BLU); gfx->setTextSize(3);
+			gfx->setCursor(TC_X + 14, ABS_Y + 14); gfx->print(absLevel);
+			prevData["v_ab"] = absLevel;
+		}
+		// Brake
+		String brakeStr = brake + "%";
+		if (prevData["v_bk"] != brakeStr) {
+			gfx->fillRect(6, BRK_Y + 16, SCREEN_WIDTH - 7, 32, BG_BRK);
+			gfx->setTextColor(RD); gfx->setTextSize(4);
+			gfx->setCursor(14, BRK_Y + 16); gfx->print(brakeStr);
+			prevData["v_bk"] = brakeStr;
+		}
+		// Tyres — pressure + temperature per column
+		String tyreP[4] = {tyrePressureFrontLeft, tyrePressureFrontRight, tyrePressureRearLeft, tyrePressureRearRight};
+		String tyreT[4] = {tyreTemperatureFrontLeft, tyreTemperatureFrontRight, tyreTemperatureRearLeft, tyreTemperatureRearRight};
+		const char* kP[4] = {"v_tpfl","v_tpfr","v_tprl","v_tprr"};
+		const char* kT[4] = {"v_ttfl","v_ttfr","v_ttrl","v_ttrr"};
+		for (uint8_t c = 0; c < 4; c++) {
+			int cx = c * 120;
+			if (prevData[kP[c]] != tyreP[c]) {
+				gfx->fillRect(6 + cx, TYR_Y + 18, 112, 24, BG_TYR);
+				gfx->setTextColor(TCL); gfx->setTextSize(3);
+				gfx->setCursor(14 + cx, TYR_Y + 18); gfx->print(tyreP[c]);
+				prevData[kP[c]] = tyreP[c];
+			}
+			if (prevData[kT[c]] != tyreT[c]) {
+				gfx->fillRect(6 + cx, TYR_Y + 80, 112, 24, BG_TYR);
+				gfx->setTextColor(RGB565(100, 180, 200)); gfx->setTextSize(3);
+				gfx->setCursor(14 + cx, TYR_Y + 80); gfx->print(tyreT[c]);
+				prevData[kT[c]] = tyreT[c];
+			}
+		}
 	}
 
 	void drawAdvancedTelemetryPage() {
-		// PAGE 3B: Advanced Telemetry - Motor, Wear, Environment, DRS, KERS, Turbo
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 20, 80));  // Header background (Purple)
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(3);
-		gfx->setCursor(10, 10);
-		gfx->print("ADVANCED");
+		const uint16_t WHT    = WHITE;
+		const uint16_t WHT_D  = RGB565( 70,  70,  75);
+		const uint16_t BLU    = RGB565( 60, 140, 240);
+		const uint16_t BLU_D  = RGB565( 18,  45,  90);
+		const uint16_t RD     = RGB565(220,  50,  50);
+		const uint16_t ORNG   = RGB565(230, 140,   0);
+		const uint16_t ORNG_D = RGB565( 90,  55,   0);
+		const uint16_t GRN    = RGB565( 60, 220,  60);
+		const uint16_t GRN_D  = RGB565( 20,  80,  20);
+		const uint16_t MGT    = RGB565(200,   0, 200);
+		const uint16_t MGT_D  = RGB565( 70,   0,  70);
+		const uint16_t BG_HDR = RGB565(  6,   8,  22);
+		const uint16_t BG_W   = RGB565(  8,   8,  10);
+		const uint16_t BG_TW  = RGB565(  8,   5,   0);
+		const uint16_t BG_BLU = RGB565(  4,   8,  20);
+		const uint16_t BG_RD  = RGB565( 16,   4,   4);
+		const uint16_t BG_GRN = RGB565(  4,  16,   4);
+		const uint16_t BG_O   = RGB565( 18,   9,   0);
+		const uint16_t BG_MGT = RGB565( 14,   0,  14);
+		const uint16_t SEP    = RGB565( 22,  20,  30);
 
-		int boxHeight = 45;
-		int boxWidth = (SCREEN_WIDTH - 15) / 2;
-		int yPos = 55;
+		if (!advFrameDrawn) {
+			gfx->fillScreen(BLACK);
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 46, BG_HDR);
+			gfx->fillRect(0, 44, SCREEN_WIDTH, 2, MGT);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(14, 9); gfx->print("ADVANCED");
 
-		// Row 1: Motor temperatures
-		// Oil Temperature
-		gfx->drawRect(5, yPos, boxWidth, boxHeight, WHITE);
-		gfx->fillRect(5, yPos, boxWidth, 20, WHITE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, yPos + 5);
-		gfx->print("OIL TEMP");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, yPos + 25);
-		gfx->print("--C");  // Placeholder - seria: oilTemperature + "C"
+			// Layout: FH=320 | Header 0..45 | OIL/WATER 46..118 | TYRE WEAR 119..181 | AIR/ROAD/DRS/TURBO 182..244 | KERS 245..319
+			const int FH=320, OW_Y=46, OW_H=73, WR_Y=119, WR_H=63, R3_Y=182, R3_H=63, KR_Y=245;
 
-		// Water Temperature
-		gfx->drawRect(5 + boxWidth + 5, yPos, boxWidth, boxHeight, WHITE);
-		gfx->fillRect(5 + boxWidth + 5, yPos, boxWidth, 20, WHITE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + boxWidth + 5, yPos + 5);
-		gfx->print("WATER TEMP");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(2);
-		gfx->setCursor(10 + boxWidth + 5, yPos + 25);
-		gfx->print("--C");  // Placeholder
+			// Row 1: OIL (left 240) | WATER (right 240), y=OW_Y..OW_Y+OW_H
+			gfx->fillRect(0,   OW_Y, 239, OW_H, BG_W);
+			gfx->fillRect(0,   OW_Y,   5, OW_H, WHT);
+			gfx->setTextColor(WHT_D); gfx->setTextSize(1);
+			gfx->setCursor(14, OW_Y + 5); gfx->print("OIL TEMP");
+			gfx->fillRect(241, OW_Y, 239, OW_H, BG_W);
+			gfx->fillRect(241, OW_Y,   5, OW_H, BLU);
+			gfx->setTextColor(BLU_D); gfx->setTextSize(1);
+			gfx->setCursor(255, OW_Y + 5); gfx->print("WATER TEMP");
+			gfx->drawLine(240, OW_Y, 240, OW_Y + OW_H, SEP);
+			gfx->fillRect(0, OW_Y + OW_H, SCREEN_WIDTH, 1, SEP);
 
-		yPos += boxHeight + 5;
+			// Row 2: TYRE WEAR, y=WR_Y..WR_Y+WR_H
+			gfx->fillRect(0, WR_Y, SCREEN_WIDTH, WR_H, BG_TW);
+			gfx->fillRect(0, WR_Y,   5, WR_H, ORNG);
+			gfx->setTextColor(ORNG_D); gfx->setTextSize(1);
+			gfx->setCursor(14, WR_Y + 5); gfx->print("TYRE WEAR");
+			gfx->fillRect(0, WR_Y + WR_H, SCREEN_WIDTH, 1, SEP);
 
-		// Row 2: Tyre Wear
-		gfx->drawRect(5, yPos, SCREEN_WIDTH - 10, boxHeight, RGB565(200, 100, 0));
-		gfx->fillRect(5, yPos, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, yPos + 5);
-		gfx->print("TYRE WEAR | FL: 0% FR: 0% RL: 0% RR: 0%");  // Placeholder
+			// Row 3: AIR | ROAD | DRS | TURBO, y=R3_Y..R3_Y+R3_H
+			const uint16_t r3acc[4] = {BLU, RD, GRN, ORNG};
+			const uint16_t r3bg[4]  = {BG_BLU, BG_RD, BG_GRN, BG_O};
+			for (uint8_t c = 0; c < 4; c++) {
+				int cx = c * 120;
+				gfx->fillRect(cx, R3_Y, 119, R3_H, r3bg[c]);
+				gfx->fillRect(cx, R3_Y,   5, R3_H, r3acc[c]);
+				if (c > 0) gfx->drawLine(cx, R3_Y, cx, R3_Y + R3_H, SEP);
+			}
+			gfx->setTextColor(BLU_D);  gfx->setTextSize(1); gfx->setCursor(  14, R3_Y + 5); gfx->print("AIR");
+			gfx->setTextColor(RGB565(80,15,15)); gfx->setCursor( 134, R3_Y + 5); gfx->print("ROAD");
+			gfx->setTextColor(GRN_D);  gfx->setCursor( 254, R3_Y + 5); gfx->print("DRS");
+			gfx->setTextColor(ORNG_D); gfx->setCursor( 374, R3_Y + 5); gfx->print("TURBO");
+			gfx->fillRect(0, R3_Y + R3_H, SCREEN_WIDTH, 1, SEP);
 
-		yPos += boxHeight + 5;
+			// Row 4: KERS bar, y=KR_Y..319
+			const int KERS_H = FH - KR_Y;
+			gfx->fillRect(0, KR_Y, SCREEN_WIDTH, KERS_H, BG_MGT);
+			gfx->fillRect(0, KR_Y,   5, KERS_H, MGT);
+			gfx->setTextColor(MGT_D); gfx->setTextSize(1);
+			gfx->setCursor(14, KR_Y + 5); gfx->print("KERS / BATTERY");
+			advFrameDrawn = true;
+		}
 
-		// Row 3: Environment + DRS/KERS/Turbo
-		// Air Temp
-		gfx->drawRect(5, yPos, 60, boxHeight, RGB565(0, 100, 200));
-		gfx->fillRect(5, yPos, 60, 20, RGB565(0, 100, 200));
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, yPos + 5);
-		gfx->print("AIR");
-		gfx->setTextColor(RGB565(0, 150, 255));
-		gfx->setTextSize(1);
-		gfx->setCursor(10, yPos + 25);
-		gfx->print("--C");
+		// Layout delta constants
+		const int OW_Y=46, OW_H=73, WR_Y=119, WR_H=63, R3_Y=182, R3_H=63, KR_Y=245;
 
-		// Road Temp
-		gfx->drawRect(70, yPos, 60, boxHeight, RGB565(200, 0, 0));
-		gfx->fillRect(70, yPos, 60, 20, RGB565(200, 0, 0));
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(75, yPos + 5);
-		gfx->print("ROAD");
-		gfx->setTextColor(RED);
-		gfx->setTextSize(1);
-		gfx->setCursor(75, yPos + 25);
-		gfx->print("--C");
-
+		// Oil temp
+		String oilStr = oilTemperature + "C";
+		if (prevData["a_oil"] != oilStr) {
+			gfx->fillRect(6, OW_Y + 18, 232, 48, BG_W);
+			gfx->setTextColor(WHT); gfx->setTextSize(4);
+			gfx->setCursor(14, OW_Y + 20); gfx->print(oilStr);
+			prevData["a_oil"] = oilStr;
+		}
+		// Water temp
+		String watStr = waterTemperature + "C";
+		if (prevData["a_wat"] != watStr) {
+			gfx->fillRect(247, OW_Y + 18, 230, 48, BG_W);
+			gfx->setTextColor(BLU); gfx->setTextSize(4);
+			gfx->setCursor(255, OW_Y + 20); gfx->print(watStr);
+			prevData["a_wat"] = watStr;
+		}
+		// Tyre wear (4 cols, textSize 3)
+		String wearFL = tyreWearFrontLeft, wearFR = tyreWearFrontRight;
+		String wearRL = tyreWearRearLeft,  wearRR = tyreWearRearRight;
+		String wearStr = wearFL + " " + wearFR + " " + wearRL + " " + wearRR;
+		if (prevData["a_wr"] != wearStr) {
+			gfx->fillRect(6, WR_Y + 18, SCREEN_WIDTH - 7, 40, BG_TW);
+			gfx->setTextColor(ORNG); gfx->setTextSize(3);
+			gfx->setCursor(14, WR_Y + 20); gfx->print("FL:" + wearFL + " FR:" + wearFR + " RL:" + wearRL + " RR:" + wearRR);
+			prevData["a_wr"] = wearStr;
+		}
+		// Air temp
+		String airStr = airTemperature + "C";
+		if (prevData["a_air"] != airStr) {
+			gfx->fillRect(6, R3_Y + 18, 112, 40, BG_BLU);
+			gfx->setTextColor(BLU); gfx->setTextSize(3);
+			gfx->setCursor(14, R3_Y + 20); gfx->print(airStr);
+			prevData["a_air"] = airStr;
+		}
+		// Road temp
+		String rdStr = roadTemperature + "C";
+		if (prevData["a_rd"] != rdStr) {
+			gfx->fillRect(126, R3_Y + 18, 112, 40, BG_RD);
+			gfx->setTextColor(RD); gfx->setTextSize(3);
+			gfx->setCursor(134, R3_Y + 20); gfx->print(rdStr);
+			prevData["a_rd"] = rdStr;
+		}
 		// DRS
-		uint16_t drsBoxColor = drsActive == "1" ? BLUE : (drsAvailable == "1" ? GREEN : RGB565(50, 50, 50));
-		gfx->drawRect(135, yPos, 60, boxHeight, drsBoxColor);
-		gfx->fillRect(135, yPos, 60, 20, drsBoxColor);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(140, yPos + 5);
-		gfx->print("DRS");
-		gfx->setTextColor(drsBoxColor == BLUE ? BLUE : WHITE);
-		gfx->setTextSize(1);
-		gfx->setCursor(140, yPos + 25);
-		gfx->print(drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "OFF"));
-
-		// KERS
-		uint16_t kersBarWidth = (String(kersLevel).toInt() * 40) / 100;  // 40px width for 100%
-		gfx->drawRect(200, yPos, 60, boxHeight, MAGENTA);
-		gfx->fillRect(200, yPos, 60, 20, MAGENTA);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(205, yPos + 5);
-		gfx->print("KERS");
-		gfx->fillRect(200, yPos + 25, kersBarWidth, 15, MAGENTA);
-
+		String drsStr = drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "OFF");
+		uint16_t drsCol = drsActive == "1" ? BLU : (drsAvailable == "1" ? GRN : RGB565(80, 80, 80));
+		if (prevData["a_drs"] != drsStr) {
+			gfx->fillRect(246, R3_Y + 18, 112, 40, BG_GRN);
+			gfx->setTextColor(drsCol); gfx->setTextSize(3);
+			gfx->setCursor(254, R3_Y + 20); gfx->print(drsStr);
+			prevData["a_drs"] = drsStr;
+		}
 		// Turbo
-		gfx->drawRect(265, yPos, 65, boxHeight, RGB565(255, 128, 0));
-		gfx->fillRect(265, yPos, 65, 20, RGB565(255, 128, 0));
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(270, yPos + 5);
-		gfx->print("TURBO");
-		gfx->setTextColor(RGB565(255, 200, 0));
-		gfx->setTextSize(1);
-		gfx->setCursor(270, yPos + 25);
-		gfx->print("0.0B");  // Placeholder
+		if (prevData["a_trb"] != turboBoost) {
+			gfx->fillRect(366, R3_Y + 18, 112, 40, BG_O);
+			gfx->setTextColor(ORNG); gfx->setTextSize(3);
+			gfx->setCursor(374, R3_Y + 20); gfx->print(turboBoost);
+			prevData["a_trb"] = turboBoost;
+		}
+		// KERS bar
+		if (prevData["a_kers"] != kersLevel) {
+			int kv = kersLevel.toInt();
+			gfx->fillRect(6, KR_Y + 5, SCREEN_WIDTH - 12, 24, BG_MGT);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(11, KR_Y + 5); gfx->print(String(kv) + "%");
+			int barW = (kv * (SCREEN_WIDTH - 22)) / 100;
+			const int BAR_Y = KR_Y + 34, BAR_H = 320 - KR_Y - 34 - 4;
+			gfx->fillRect(11, BAR_Y, SCREEN_WIDTH - 22, BAR_H, RGB565(30, 0, 30));
+			if (barW > 0) gfx->fillRect(11, BAR_Y, barW, BAR_H, MGT);
+			prevData["a_kers"] = kersLevel;
+		}
 	}
 
 	void drawLapsPageContent() {
-		// PAGE 5: Laps/Sectors Analysis - with nice layout
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(40, 20, 60));  // Header background
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 12);
-		gfx->print("LAPS/SECTORS");
+		const uint16_t GOLD   = RGB565(220, 172,   0);
+		const uint16_t GOLD_D = RGB565(100,  78,   0);
+		const uint16_t TEAL   = RGB565(  0, 200, 220);
+		const uint16_t TEAL_D = RGB565(  0,  80,  95);
+		const uint16_t LIME   = RGB565( 60, 230,  80);
+		const uint16_t LIME_D = RGB565( 24,  95,  32);
+		const uint16_t ORNG   = RGB565(230, 140,   0);
+		const uint16_t ORNG_D = RGB565( 90,  55,   0);
+		const uint16_t BG_HDR = RGB565(  6,   8,  22);
+		const uint16_t BG_G   = RGB565( 16,  12,   0);
+		const uint16_t BG_T   = RGB565(  0,  12,  14);
+		const uint16_t BG_L   = RGB565(  4,  16,   6);
+		const uint16_t BG_S   = RGB565(  6,   6,  18);
+		const uint16_t BG_W   = RGB565( 10,   7,   0);
+		const uint16_t SEP    = RGB565( 22,  20,  30);
+		const uint16_t sCols[3] = {GOLD, TEAL, LIME};
 
-		// Lap times summary - Three boxes spanning full width
-		int boxWidth = (SCREEN_WIDTH - 20) / 3;  // 3 boxes with 5px spacing
-		int boxHeight = 65;
+		if (!lapsFrameDrawn) {
+			gfx->fillScreen(BLACK);
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 46, BG_HDR);
+			gfx->fillRect(0, 44, SCREEN_WIDTH, 2, GOLD);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(14, 9); gfx->print("LAPS/SECTORS");
 
-		// Best lap
-		gfx->drawRect(5, 50, boxWidth, boxHeight, YELLOW);
-		gfx->fillRect(5, 50, boxWidth, 20, YELLOW);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(8, 57);
-		gfx->print("BEST");
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 72);
-		gfx->print(bestLapTime);
+			// Layout: FH=320 | Header 0..45 | BEST/LAST 46..128 | CURRENT 129..188 | SECTORS 189..257 | TYRE WEAR 258..319
+			const int FH=320, BL_Y=46, BL_H=83, CL_Y=129, CL_H=59, SC_Y=189, SC_H=68, WR_Y=258;
 
-		// Last lap
-		gfx->drawRect(5 + boxWidth + 5, 50, boxWidth, boxHeight, CYAN);
-		gfx->fillRect(5 + boxWidth + 5, 50, boxWidth, 20, CYAN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(8 + boxWidth + 5, 57);
-		gfx->print("LAST");
-		gfx->setTextColor(CYAN);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + boxWidth + 5, 72);
-		gfx->print(lastLapTime);
+			// BEST (left 240) | LAST (right 240), y=BL_Y..BL_Y+BL_H
+			gfx->fillRect(0,   BL_Y, 239, BL_H, BG_G);
+			gfx->fillRect(0,   BL_Y,   5, BL_H, GOLD);
+			gfx->setTextColor(GOLD_D); gfx->setTextSize(1);
+			gfx->setCursor(14, BL_Y + 5); gfx->print("BEST LAP");
+			gfx->fillRect(241, BL_Y, 239, BL_H, BG_T);
+			gfx->fillRect(241, BL_Y,   5, BL_H, TEAL);
+			gfx->setTextColor(TEAL_D); gfx->setTextSize(1);
+			gfx->setCursor(255, BL_Y + 5); gfx->print("LAST LAP");
+			gfx->drawLine(240, BL_Y, 240, BL_Y + BL_H, SEP);
+			gfx->fillRect(0, BL_Y + BL_H, SCREEN_WIDTH, 1, SEP);
 
-		// Current lap
-		gfx->drawRect(5 + (boxWidth + 5) * 2, 50, boxWidth, boxHeight, GREEN);
-		gfx->fillRect(5 + (boxWidth + 5) * 2, 50, boxWidth, 20, GREEN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(8 + (boxWidth + 5) * 2, 57);
-		gfx->print("NOW");
-		gfx->setTextColor(GREEN);
-		gfx->setTextSize(1);
-		gfx->setCursor(10 + (boxWidth + 5) * 2, 72);
-		gfx->print(currentLapTime);
+			// CURRENT LAP, y=CL_Y..CL_Y+CL_H
+			gfx->fillRect(0, CL_Y, SCREEN_WIDTH, CL_H, BG_L);
+			gfx->fillRect(0, CL_Y,   5, CL_H, LIME);
+			gfx->setTextColor(LIME_D); gfx->setTextSize(1);
+			gfx->setCursor(14, CL_Y + 5); gfx->print("CURRENT LAP");
+			gfx->fillRect(0, CL_Y + CL_H, SCREEN_WIDTH, 1, SEP);
 
-		// Sector times - detailed box (full width) - AGORA COM DADOS REAIS
-		gfx->drawRect(5, 125, SCREEN_WIDTH - 10, 120, WHITE);
-		gfx->fillRect(5, 125, SCREEN_WIDTH - 10, 25, WHITE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 132);
-		gfx->print("SECTOR TIMES");
+			// Sectors 3 cols 160px each, y=SC_Y..SC_Y+SC_H
+			const char* sLabels[3] = {"S1","S2","S3"};
+			for (uint8_t c = 0; c < 3; c++) {
+				int cx = c * 160;
+				gfx->fillRect(cx, SC_Y, 159, SC_H, BG_S);
+				gfx->fillRect(cx, SC_Y,   5, SC_H, sCols[c]);
+				if (c > 0) gfx->drawLine(cx, SC_Y, cx, SC_Y + SC_H, SEP);
+				gfx->setTextColor(RGB565(60, 60, 80)); gfx->setTextSize(1);
+				gfx->setCursor(14 + cx, SC_Y + 5); gfx->print(sLabels[c]);
+			}
+			gfx->fillRect(0, SC_Y + SC_H, SCREEN_WIDTH, 1, SEP);
 
-		// Sector 1
-		gfx->setTextColor(WHITE);
-		gfx->setCursor(15, 160);
-		gfx->print("S1");
-		gfx->setCursor(45, 160);
-		gfx->print(": " + sector1Time);
-
-		// Sector 2
-		gfx->setTextColor(WHITE);
-		gfx->setCursor(15, 180);
-		gfx->print("S2");
-		gfx->setCursor(45, 180);
-		gfx->print(": " + sector2Time);
-
-		// Sector 3
-		gfx->setTextColor(WHITE);
-		gfx->setCursor(15, 200);
-		gfx->print("S3");
-		gfx->setCursor(45, 200);
-		gfx->print(": " + sector3Time);
-
-		// Lap invalid status
-		if (lapInvalidated == "True") {
-			gfx->setTextColor(RED);
-			gfx->setCursor(220, 145);
-			gfx->print("INVALID");
+			// Wear strip, y=WR_Y..319
+			const int WEAR_H = FH - WR_Y;
+			gfx->fillRect(0, WR_Y, SCREEN_WIDTH, WEAR_H, BG_W);
+			gfx->fillRect(0, WR_Y,   5, WEAR_H, ORNG);
+			gfx->setTextColor(ORNG_D); gfx->setTextSize(1);
+			gfx->setCursor(14, WR_Y + 5); gfx->print("TYRE WEAR");
+			lapsFrameDrawn = true;
 		}
 
-		// Tyre wear bar (full width at bottom)
-		gfx->drawRect(5, 260, SCREEN_WIDTH - 10, 20, RGB565(200, 100, 0));
-		gfx->fillRect(5, 260, SCREEN_WIDTH - 10, 5, RGB565(200, 100, 0));
-		gfx->setTextColor(RGB565(255, 200, 0));
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 265);
+		// Layout delta constants
+		const int BL_Y=46, BL_H=83, CL_Y=129, CL_H=59, SC_Y=189, SC_H=68, WR_Y=258;
 
-		// Draw wear percentages
-		String wearStr = "Wear - FL:" + tyreWearFrontLeft + "% FR:" + tyreWearFrontRight +
-		                 "% RL:" + tyreWearRearLeft + "% RR:" + tyreWearRearRight + "%";
-		gfx->print(wearStr);
+		// Best lap
+		if (prevData["l_best"] != bestLapTime) {
+			gfx->fillRect(6, BL_Y + 18, 232, 56, BG_G);
+			gfx->setTextColor(GOLD); gfx->setTextSize(4);
+			gfx->setCursor(14, BL_Y + 20); gfx->print(bestLapTime);
+			prevData["l_best"] = bestLapTime;
+		}
+		// Last lap
+		if (prevData["l_last"] != lastLapTime) {
+			gfx->fillRect(247, BL_Y + 18, 230, 56, BG_T);
+			gfx->setTextColor(TEAL); gfx->setTextSize(4);
+			gfx->setCursor(255, BL_Y + 20); gfx->print(lastLapTime);
+			prevData["l_last"] = lastLapTime;
+		}
+		// Current lap
+		if (prevData["l_cur"] != currentLapTime) {
+			gfx->fillRect(6, CL_Y + 18, SCREEN_WIDTH - 7, 36, BG_L);
+			uint16_t curCol = (lapInvalidated == "True") ? RGB565(220, 60, 60) : LIME;
+			gfx->setTextColor(curCol); gfx->setTextSize(4);
+			gfx->setCursor(14, CL_Y + 18); gfx->print(currentLapTime);
+			prevData["l_cur"] = currentLapTime;
+		}
+		// Sectors
+		String sVals[3] = {sector1Time, sector2Time, sector3Time};
+		const char* sKeys[3] = {"l_s1","l_s2","l_s3"};
+		for (uint8_t c = 0; c < 3; c++) {
+			if (prevData[sKeys[c]] != sVals[c]) {
+				int cx = c * 160;
+				gfx->fillRect(6 + cx, SC_Y + 18, 152, 40, BG_S);
+				gfx->setTextColor(sCols[c]); gfx->setTextSize(3);
+				gfx->setCursor(14 + cx, SC_Y + 20); gfx->print(sVals[c]);
+				prevData[sKeys[c]] = sVals[c];
+			}
+		}
+		// Wear strip
+		String wearStr = "FL:" + tyreWearFrontLeft + " FR:" + tyreWearFrontRight + " RL:" + tyreWearRearLeft + " RR:" + tyreWearRearRight;
+		if (prevData["l_wear"] != wearStr) {
+			gfx->fillRect(6, WR_Y + 18, SCREEN_WIDTH - 7, 36, BG_W);
+			gfx->setTextColor(ORNG); gfx->setTextSize(3);
+			gfx->setCursor(14, WR_Y + 20); gfx->print(wearStr);
+			prevData["l_wear"] = wearStr;
+		}
 	}
 
 	void drawRelativePageContent() {
-		// PAGE 4: Position, Gaps, Fuel & DRS - DADOS ESTRATÉGICOS
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(60, 40, 20));  // Header background
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 12);
-		gfx->print("STRATEGY");
+		const uint16_t WHT    = WHITE;
+		const uint16_t WHT_D  = RGB565( 80,  80,  90);
+		const uint16_t MGT    = RGB565(200,  60, 220);
+		const uint16_t MGT_D  = RGB565( 75,  22,  82);
+		const uint16_t ORNG   = RGB565(230, 140,   0);
+		const uint16_t ORNG_D = RGB565( 90,  55,   0);
+		const uint16_t GRN    = RGB565( 60, 230,  80);
+		const uint16_t GRN_D  = RGB565( 24, 100,  32);
+		const uint16_t RD     = RGB565(220,  50,  50);
+		const uint16_t TCL    = RGB565(  0, 200, 220);
+		const uint16_t TCL_D  = RGB565(  0,  80,  95);
+		const uint16_t BG_HDR = RGB565(  6,   8,  22);
+		const uint16_t BG_P   = RGB565( 10,  10,  14);
+		const uint16_t BG_GA  = RGB565( 14,   0,  16);
+		const uint16_t BG_GB  = RGB565( 18,  10,   0);
+		const uint16_t BG_FL  = RGB565(  4,  16,   6);
+		const uint16_t BG_FLR = RGB565( 16,   4,   4);
+		const uint16_t BG_DRS = RGB565(  4,  14,  16);
+		const uint16_t BG_BTM = RGB565(  0,   9,  12);
+		const uint16_t SEP    = RGB565( 22,  20,  30);
 
-		// Position Box - Top
-		gfx->drawRect(5, 50, SCREEN_WIDTH - 10, 50, WHITE);
-		gfx->fillRect(5, 50, SCREEN_WIDTH - 10, 25, WHITE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 57);
-		gfx->print("POSITION");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(3);
-		gfx->setCursor(20, 75);
-		gfx->print(position + "/" + opponentsCount);
+		if (!stratFrameDrawn) {
+			gfx->fillScreen(BLACK);
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 46, BG_HDR);
+			gfx->fillRect(0, 44, SCREEN_WIDTH, 2, WHT);
+			gfx->setTextColor(WHITE); gfx->setTextSize(3);
+			gfx->setCursor(14, 9); gfx->print("STRATEGY");
 
-		// Gap+ Box (Driver Ahead)
-		gfx->drawRect(5, 110, (SCREEN_WIDTH - 15) / 2, 50, MAGENTA);
-		gfx->fillRect(5, 110, (SCREEN_WIDTH - 15) / 2, 25, MAGENTA);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 117);
-		gfx->print("GAP TO AHEAD");
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(2);
-		gfx->setCursor(15, 135);
-		gfx->print(driverAheadGap);
+			// Layout: FH=320 | Header 0..45 | POSITION 46..128 | GAP AHD/BHD 129..197 | FUEL LAPS/DRS 198..257 | BTM 258..319
+			const int FH=320, POS_Y=46, POS_H=83, GAP_Y=129, GAP_H=69, ROW3_Y=198, ROW3_H=59, BTM_Y=258;
 
-		// Gap- Box (Driver Behind)
-		int halfWidth = (SCREEN_WIDTH - 15) / 2;
-		gfx->drawRect(10 + halfWidth, 110, halfWidth, 50, ORANGE);
-		gfx->fillRect(10 + halfWidth, 110, halfWidth, 25, ORANGE);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(15 + halfWidth, 117);
-		gfx->print("GAP TO BEHIND");
-		gfx->setTextColor(ORANGE);
-		gfx->setTextSize(2);
-		gfx->setCursor(20 + halfWidth, 135);
-		gfx->print(driverBehindGap);
+			// POSITION full width, y=POS_Y..POS_Y+POS_H
+			gfx->fillRect(0, POS_Y, SCREEN_WIDTH, POS_H, BG_P);
+			gfx->fillRect(0, POS_Y,   5, POS_H, WHT);
+			gfx->setTextColor(WHT_D); gfx->setTextSize(1);
+			gfx->setCursor(14, POS_Y + 5); gfx->print("POSITION");
+			gfx->fillRect(0, POS_Y + POS_H, SCREEN_WIDTH, 1, SEP);
 
-		// Fuel Box
-		gfx->drawRect(5, 170, (SCREEN_WIDTH - 15) / 2, 50, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
-		gfx->fillRect(5, 170, (SCREEN_WIDTH - 15) / 2, 25, fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 177);
-		gfx->print("FUEL LAPS");
-		gfx->setTextColor(fuelRemainingLaps.toFloat() < 2 ? RED : GREEN);
-		gfx->setTextSize(2);
-		gfx->setCursor(15, 195);
-		gfx->print(fuelRemainingLaps);
+			// GAP AHEAD (left 240) | GAP BEHIND (right 240), y=GAP_Y..GAP_Y+GAP_H
+			gfx->fillRect(0,   GAP_Y, 239, GAP_H, BG_GA);
+			gfx->fillRect(0,   GAP_Y,   5, GAP_H, MGT);
+			gfx->setTextColor(MGT_D); gfx->setTextSize(1);
+			gfx->setCursor(14, GAP_Y + 5); gfx->print("GAP AHEAD");
+			gfx->fillRect(241, GAP_Y, 239, GAP_H, BG_GB);
+			gfx->fillRect(241, GAP_Y,   5, GAP_H, ORNG);
+			gfx->setTextColor(ORNG_D); gfx->setTextSize(1);
+			gfx->setCursor(255, GAP_Y + 5); gfx->print("GAP BEHIND");
+			gfx->drawLine(240, GAP_Y, 240, GAP_Y + GAP_H, SEP);
+			gfx->fillRect(0, GAP_Y + GAP_H, SCREEN_WIDTH, 1, SEP);
 
-		// DRS Box
-		uint16_t drsColor = WHITE;
-		String drsText = "CLOSED";
-		if (drsActive == "1") {
-			drsColor = BLUE;
-			drsText = "OPEN";
-		} else if (drsAvailable == "1") {
-			drsColor = GREEN;
-			drsText = "AVAIL";
+			// FUEL (left) | DRS (right), y=ROW3_Y..ROW3_Y+ROW3_H
+			gfx->fillRect(0,   ROW3_Y, 239, ROW3_H, BG_FL);
+			gfx->fillRect(0,   ROW3_Y,   5, ROW3_H, GRN);
+			gfx->setTextColor(GRN_D); gfx->setTextSize(1);
+			gfx->setCursor(14, ROW3_Y + 5); gfx->print("FUEL LAPS");
+			gfx->fillRect(241, ROW3_Y, 239, ROW3_H, BG_DRS);
+			gfx->fillRect(241, ROW3_Y,   5, ROW3_H, TCL);
+			gfx->setTextColor(TCL_D); gfx->setTextSize(1);
+			gfx->setCursor(255, ROW3_Y + 5); gfx->print("DRS");
+			gfx->drawLine(240, ROW3_Y, 240, ROW3_Y + ROW3_H, SEP);
+			gfx->fillRect(0, ROW3_Y + ROW3_H, SCREEN_WIDTH, 1, SEP);
+
+			// Bottom strip: FUEL/LAP + TIME LEFT, y=BTM_Y..319
+			const int BTM_H = FH - BTM_Y;
+			gfx->fillRect(0, BTM_Y, SCREEN_WIDTH, BTM_H, BG_BTM);
+			gfx->fillRect(0, BTM_Y,   5, BTM_H, TCL);
+			gfx->setTextColor(TCL_D); gfx->setTextSize(1);
+			gfx->setCursor(14, BTM_Y + 5); gfx->print("FUEL/LAP");
+			gfx->setCursor(255, BTM_Y + 5); gfx->print("TIME LEFT");
+			stratFrameDrawn = true;
 		}
-		gfx->drawRect(10 + halfWidth, 170, halfWidth, 50, drsColor);
-		gfx->fillRect(10 + halfWidth, 170, halfWidth, 25, drsColor);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(15 + halfWidth, 177);
-		gfx->print("DRS STATUS");
-		gfx->setTextColor(drsColor);
-		gfx->setTextSize(2);
-		gfx->setCursor(20 + halfWidth, 195);
-		gfx->print(drsText);
 
-		// Fuel consumption info at bottom
-		gfx->drawRect(5, 230, SCREEN_WIDTH - 10, 35, CYAN);
-		gfx->fillRect(5, 230, SCREEN_WIDTH - 10, 20, CYAN);
-		gfx->setTextColor(BLACK);
-		gfx->setTextSize(1);
-		gfx->setCursor(10, 237);
-		gfx->print("Fuel/Lap: " + fuelLitersPerLap + " L");
-		gfx->setTextColor(CYAN);
-		gfx->setCursor(10, 250);
-		gfx->print("Time left: " + sessionTimeLeft);
+		// Layout delta constants
+		const int POS_Y=46, POS_H=83, GAP_Y=129, GAP_H=69, ROW3_Y=198, ROW3_H=59, BTM_Y=258;
+
+		// Position
+		String posStr = "P" + position + " / " + opponentsCount;
+		if (prevData["s_pos"] != posStr) {
+			gfx->fillRect(6, POS_Y + 22, SCREEN_WIDTH - 7, 56, BG_P);
+			gfx->setTextColor(WHITE); gfx->setTextSize(5);
+			gfx->setCursor(14, POS_Y + 24); gfx->print(posStr);
+			prevData["s_pos"] = posStr;
+		}
+		// Gap ahead
+		if (prevData["s_ga"] != driverAheadGap) {
+			gfx->fillRect(6, GAP_Y + 22, 232, 42, BG_GA);
+			gfx->setTextColor(MGT); gfx->setTextSize(4);
+			gfx->setCursor(14, GAP_Y + 24); gfx->print(driverAheadGap);
+			prevData["s_ga"] = driverAheadGap;
+		}
+		// Gap behind
+		if (prevData["s_gb"] != driverBehindGap) {
+			gfx->fillRect(247, GAP_Y + 22, 230, 42, BG_GB);
+			gfx->setTextColor(ORNG); gfx->setTextSize(4);
+			gfx->setCursor(255, GAP_Y + 24); gfx->print(driverBehindGap);
+			prevData["s_gb"] = driverBehindGap;
+		}
+		// Fuel laps (color changes when low)
+		float fuelF = fuelRemainingLaps.toFloat();
+		uint16_t fuelCol = fuelF < 2.0f ? RD : (fuelF < 4.0f ? ORNG : GRN);
+		uint16_t fuelBg  = fuelF < 2.0f ? BG_FLR : BG_FL;
+		String fuelKey = fuelRemainingLaps + (fuelF < 2.0f ? "r" : "g");
+		if (prevData["s_fl"] != fuelKey) {
+			gfx->fillRect(0, ROW3_Y, 239, ROW3_H, fuelBg);
+			gfx->fillRect(0, ROW3_Y,   5, ROW3_H, fuelCol);
+			gfx->setTextColor(GRN_D); gfx->setTextSize(1);
+			gfx->setCursor(14, ROW3_Y + 5); gfx->print("FUEL LAPS");
+			gfx->fillRect(6, ROW3_Y + 22, 232, 34, fuelBg);
+			gfx->setTextColor(fuelCol); gfx->setTextSize(3);
+			gfx->setCursor(14, ROW3_Y + 24); gfx->print(fuelRemainingLaps);
+			prevData["s_fl"] = fuelKey;
+		}
+		// DRS
+		String drsStr = drsActive == "1" ? "OPEN" : (drsAvailable == "1" ? "AVAIL" : "CLOSED");
+		uint16_t drsCol = drsActive == "1" ? RGB565(60, 160, 255) : (drsAvailable == "1" ? GRN : RGB565(80,80,90));
+		if (prevData["s_drs"] != drsStr) {
+			gfx->fillRect(247, ROW3_Y + 22, 230, 34, BG_DRS);
+			gfx->setTextColor(drsCol); gfx->setTextSize(3);
+			gfx->setCursor(255, ROW3_Y + 24); gfx->print(drsStr);
+			prevData["s_drs"] = drsStr;
+		}
+		// Bottom: fuel/lap
+		if (prevData["s_fpl"] != fuelLitersPerLap) {
+			gfx->fillRect(6, BTM_Y + 18, 238, 40, BG_BTM);
+			gfx->setTextColor(TCL); gfx->setTextSize(3);
+			gfx->setCursor(14, BTM_Y + 20); gfx->print(fuelLitersPerLap + "L");
+			prevData["s_fpl"] = fuelLitersPerLap;
+		}
+		// Bottom: time left
+		if (prevData["s_tl"] != sessionTimeLeft) {
+			gfx->fillRect(247, BTM_Y + 18, 230, 40, BG_BTM);
+			gfx->setTextColor(TCL); gfx->setTextSize(3);
+			gfx->setCursor(255, BTM_Y + 20); gfx->print(sessionTimeLeft);
+			prevData["s_tl"] = sessionTimeLeft;
+		}
 	}
 
 	// ── Track Map Helpers ──────────────────────────────────────
@@ -1575,227 +1792,167 @@ public:
 	}
 
 	void drawMapPageContent() {
-		// PAGE 6: Track Map + Strategy
-		// ── Header (40px) ──────────────────────────────────────────
-		gfx->fillRect(0, 0, SCREEN_WIDTH, 40, RGB565(20, 40, 60));
-		gfx->setTextColor(CYAN);
-		gfx->setTextSize(2);
-		gfx->setCursor(10, 4);
-		gfx->print("MAP");
+		const uint16_t CYN    = RGB565(  0, 200, 220);
+		const uint16_t YLW    = RGB565(230, 210,   0);
+		const uint16_t GRN    = RGB565( 60, 230,  80);
+		const uint16_t RD     = RGB565(220,  50,  50);
+		const uint16_t MGT    = RGB565(200,  60, 220);
+		const uint16_t BLU    = RGB565( 60, 140, 240);
+		const uint16_t ORNG   = RGB565(230, 150,   0);
+		const uint16_t BG_HDR = RGB565(  6,   8,  22);
+		const uint16_t BG_PAN = RGB565(  8,   8,  12);
+		const uint16_t DIM    = RGB565(120, 120, 130);
+		const uint16_t SEP    = RGB565( 22,  20,  30);
+		const int PANEL_X     = 280;
 
-		// Track name (truncate if too long)
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(1);
-		String displayTrack = trackId;
-		if (displayTrack.length() > 20) displayTrack = displayTrack.substring(0, 20);
-		gfx->setCursor(60, 8);
-		gfx->print(displayTrack);
-
-		// Position + Fuel in header
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(2);
-		gfx->setCursor(240, 4);
-		gfx->print("P" + position);
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(1);
-		gfx->setCursor(240, 24);
-		gfx->print("/" + opponentsCount);
-
-		// Fuel remaining laps in header
-		uint16_t fuelColor = fuelRemainingLaps.toFloat() < 3.0 ? RED : GREEN;
-		gfx->setTextColor(fuelColor);
-		gfx->setTextSize(2);
-		gfx->setCursor(340, 4);
-		gfx->print(fuelRemainingLaps);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setTextSize(1);
-		gfx->setCursor(340, 24);
-		gfx->print("FUEL LAPS");
-
-		// ── Track Map (left side: 0-270px, y: 42-230) ─────────────
-		const int mapOX = 25;    // Offset X for track polyline
-		const int mapOY = 50;    // Offset Y for track polyline
-
-		float myPos = trackPositionPercent.toFloat();
-		float aheadPos = aheadTrackPosition.toFloat();
-		float behindPos = behindTrackPosition.toFloat();
-
-		const TrackMapEntry* tmap = findTrackMap(trackId);
-
-		if (tmap) {
-			// ── Real track polyline from PROGMEM ──
-			drawTrackPolyline(tmap->points, tmap->numPoints, mapOX, mapOY, RGB565(80, 80, 80));
-
-			// Start/Finish marker at point[0]
-			int sfX = (int16_t)pgm_read_word(&tmap->points[0]) + mapOX;
-			int sfY = (int16_t)pgm_read_word(&tmap->points[1]) + mapOY;
-			gfx->drawLine(sfX - 4, sfY - 4, sfX + 4, sfY - 4, WHITE);
-			gfx->drawLine(sfX - 4, sfY + 4, sfX + 4, sfY + 4, WHITE);
-
-			int dotX, dotY;
-
-			// Car ahead (red dot)
-			if (aheadPos > 0.001f) {
-				getPositionOnTrack(tmap->points, tmap->numPoints, aheadPos, mapOX, mapOY, dotX, dotY);
-				gfx->fillCircle(dotX, dotY, 4, RED);
-				gfx->setTextColor(RED); gfx->setTextSize(1);
-				gfx->setCursor(dotX + 6, dotY - 3); gfx->print("A");
-			}
-
-			// Car behind (blue dot)
-			if (behindPos > 0.001f) {
-				getPositionOnTrack(tmap->points, tmap->numPoints, behindPos, mapOX, mapOY, dotX, dotY);
-				gfx->fillCircle(dotX, dotY, 4, BLUE);
-				gfx->setTextColor(BLUE); gfx->setTextSize(1);
-				gfx->setCursor(dotX + 6, dotY - 3); gfx->print("B");
-			}
-
-			// Player (green dot, drawn last)
-			if (myPos > 0.001f || hasReceivedData) {
-				getPositionOnTrack(tmap->points, tmap->numPoints, myPos, mapOX, mapOY, dotX, dotY);
-				gfx->fillCircle(dotX, dotY, 5, GREEN);
-				gfx->drawCircle(dotX, dotY, 6, WHITE);
-			}
-		} else {
-			// ── Fallback: generic oval ──
-			const int mapCX = 135, mapCY = 140, mapRX = 110, mapRY = 70;
-			gfx->drawEllipse(mapCX, mapCY, mapRX, mapRY, RGB565(60, 60, 60));
-			gfx->drawEllipse(mapCX, mapCY, mapRX - 1, mapRY - 1, RGB565(80, 80, 80));
-			gfx->drawEllipse(mapCX, mapCY, mapRX + 1, mapRY + 1, RGB565(60, 60, 60));
-			gfx->drawLine(mapCX - 4, mapCY - mapRY - 4, mapCX + 4, mapCY - mapRY - 4, WHITE);
-			gfx->drawLine(mapCX - 4, mapCY - mapRY + 4, mapCX + 4, mapCY - mapRY + 4, WHITE);
-
-			if (aheadPos > 0.001f) {
-				float aAngle = aheadPos * TWO_PI - HALF_PI;
-				int aX = mapCX + (int)(mapRX * cos(aAngle));
-				int aY = mapCY + (int)(mapRY * sin(aAngle));
-				gfx->fillCircle(aX, aY, 4, RED);
-				gfx->setTextColor(RED); gfx->setTextSize(1);
-				gfx->setCursor(aX + 6, aY - 3); gfx->print("A");
-			}
-			if (behindPos > 0.001f) {
-				float bAngle = behindPos * TWO_PI - HALF_PI;
-				int bX = mapCX + (int)(mapRX * cos(bAngle));
-				int bY = mapCY + (int)(mapRY * sin(bAngle));
-				gfx->fillCircle(bX, bY, 4, BLUE);
-				gfx->setTextColor(BLUE); gfx->setTextSize(1);
-				gfx->setCursor(bX + 6, bY - 3); gfx->print("B");
-			}
-			if (myPos > 0.001f || hasReceivedData) {
-				float mAngle = myPos * TWO_PI - HALF_PI;
-				int mX = mapCX + (int)(mapRX * cos(mAngle));
-				int mY = mapCY + (int)(mapRY * sin(mAngle));
-				gfx->fillCircle(mX, mY, 5, GREEN);
-				gfx->drawCircle(mX, mY, 6, WHITE);
-			}
+		if (!mapFrameDrawn) {
+			gfx->fillScreen(BLACK);
+			gfx->fillRect(0, 0, SCREEN_WIDTH, 42, BG_HDR);
+			gfx->fillRect(0, 41, SCREEN_WIDTH, 2, CYN);
+			gfx->setTextColor(CYN); gfx->setTextSize(2);
+			gfx->setCursor(10, 10); gfx->print("MAP");
+			// Right panel bg + separator (fills to physical bottom)
+			const int MAP_PAN_H = 320 - 43;
+			gfx->fillRect(PANEL_X - 5, 43, SCREEN_WIDTH - PANEL_X + 5, MAP_PAN_H, BG_PAN);
+			gfx->drawLine(PANEL_X - 7, 43, PANEL_X - 7, 319, SEP);
+			mapFrameDrawn = true;
 		}
 
-		// ── Right Panel: Strategy Data (x: 275-475, y: 45-230) ────
-		const int panelX = 280;
-		const int panelW = SCREEN_WIDTH - panelX - 5;
-		int yPos = 48;
-		const int rowH = 22;
+		// Header: track name
+		if (prevData["m_trk"] != trackId) {
+			gfx->fillRect(55, 4, 180, 32, BG_HDR);
+			String dt = trackId; if (dt.length() > 17) dt = dt.substring(0, 17);
+			gfx->setTextColor(WHITE); gfx->setTextSize(1);
+			gfx->setCursor(55, 13); gfx->print(dt);
+			prevData["m_trk"] = trackId;
+		}
+		// Header: position
+		String hPos = "P" + position + "/" + opponentsCount;
+		if (prevData["m_hpos"] != hPos) {
+			gfx->fillRect(PANEL_X, 4, SCREEN_WIDTH - PANEL_X, 36, BG_HDR);
+			gfx->setTextColor(YLW); gfx->setTextSize(2);
+			gfx->setCursor(PANEL_X, 6); gfx->print(hPos);
+			prevData["m_hpos"] = hPos;
+		}
 
-		// Vertical separator line
-		gfx->drawLine(275, 42, 275, 230, RGB565(60, 60, 60));
+		// Map area: redraw when track or positions change
+		String posKey = trackPositionPercent + "|" + aheadTrackPosition + "|" + behindTrackPosition;
+		if (!mapTrackDrawn || mapLastTrackId != trackId || prevData["m_pk"] != posKey) {
+			gfx->fillRect(0, 43, PANEL_X - 8, (SCREEN_HEIGHT + 48) - 43, BLACK);
+			const TrackMapEntry* tmap = findTrackMap(trackId);
+			float myPos = trackPositionPercent.toFloat();
+			float aPos  = aheadTrackPosition.toFloat();
+			float bPos  = behindTrackPosition.toFloat();
+			int dx, dy;
+			if (tmap) {
+				drawTrackPolyline(tmap->points, tmap->numPoints, 25, 52, RGB565(80, 80, 80));
+				int sfX = (int16_t)pgm_read_word(&tmap->points[0]) + 25;
+				int sfY = (int16_t)pgm_read_word(&tmap->points[1]) + 52;
+				gfx->drawLine(sfX-4, sfY-4, sfX+4, sfY-4, WHITE);
+				gfx->drawLine(sfX-4, sfY+4, sfX+4, sfY+4, WHITE);
+				if (aPos > 0.001f) {
+					getPositionOnTrack(tmap->points, tmap->numPoints, aPos, 25, 52, dx, dy);
+					gfx->fillCircle(dx, dy, 4, RD);
+					gfx->setTextColor(RD); gfx->setTextSize(1); gfx->setCursor(dx+6, dy-3); gfx->print("A");
+				}
+				if (bPos > 0.001f) {
+					getPositionOnTrack(tmap->points, tmap->numPoints, bPos, 25, 52, dx, dy);
+					gfx->fillCircle(dx, dy, 4, BLU);
+					gfx->setTextColor(BLU); gfx->setTextSize(1); gfx->setCursor(dx+6, dy-3); gfx->print("B");
+				}
+				if (myPos > 0.001f || hasReceivedData) {
+					getPositionOnTrack(tmap->points, tmap->numPoints, myPos, 25, 52, dx, dy);
+					gfx->fillCircle(dx, dy, 5, GRN); gfx->drawCircle(dx, dy, 6, WHITE);
+				}
+			} else {
+				const int mCX=133, mCY=141, mRX=108, mRY=68;
+				gfx->drawEllipse(mCX, mCY, mRX, mRY, RGB565(60,60,60));
+				gfx->drawEllipse(mCX, mCY, mRX-1, mRY-1, RGB565(80,80,80));
+				if (aPos > 0.001f) { float a=aPos*TWO_PI-HALF_PI; int x=mCX+(int)(mRX*cos(a)),y=mCY+(int)(mRY*sin(a)); gfx->fillCircle(x,y,4,RD); }
+				if (bPos > 0.001f) { float a=bPos*TWO_PI-HALF_PI; int x=mCX+(int)(mRX*cos(a)),y=mCY+(int)(mRY*sin(a)); gfx->fillCircle(x,y,4,BLU); }
+				if (myPos > 0.001f || hasReceivedData) { float a=myPos*TWO_PI-HALF_PI; int x=mCX+(int)(mRX*cos(a)),y=mCY+(int)(mRY*sin(a)); gfx->fillCircle(x,y,5,GRN); gfx->drawCircle(x,y,6,WHITE); }
+			}
+			mapLastTrackId = trackId; mapTrackDrawn = true;
+			prevData["m_pk"] = posKey;
+		}
 
-		// Delta
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("DELTA");
-		gfx->setTextColor(sessionBestLiveDeltaSeconds.indexOf('-') >= 0 ? GREEN : RED);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 60, yPos - 2);
-		gfx->print(sessionBestLiveDeltaSeconds);
-		yPos += rowH + 4;
-
-		// Gap Ahead
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("GAP");
-		gfx->setTextColor(RED);
-		gfx->setCursor(panelX + 25, yPos);
-		gfx->print("\x18");  // Up arrow
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 60, yPos - 2);
-		gfx->print(driverAheadGap);
-		yPos += rowH;
-
-		// Gap Behind
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("GAP");
-		gfx->setTextColor(BLUE);
-		gfx->setCursor(panelX + 25, yPos);
-		gfx->print("\x19");  // Down arrow
-		gfx->setTextColor(ORANGE);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 60, yPos - 2);
-		gfx->print(driverBehindGap);
-		yPos += rowH + 4;
-
-		// Speed + Gear (same row)
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("SPD");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 35, yPos - 2);
-		gfx->print(speed);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setTextSize(1);
-		gfx->setCursor(panelX + 110, yPos);
-		gfx->print("G");
-		gfx->setTextColor(WHITE);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 125, yPos - 2);
-		gfx->print(gear);
-		yPos += rowH + 2;
-
-		// Brake Bias
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("BB");
-		gfx->setTextColor(MAGENTA);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 35, yPos - 2);
-		gfx->print(brakeBias);
-		yPos += rowH;
-
-		// TC / ABS
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("TC");
-		gfx->setTextColor(YELLOW);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 25, yPos - 2);
-		gfx->print(tcLevel);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setTextSize(1);
-		gfx->setCursor(panelX + 65, yPos);
-		gfx->print("ABS");
-		gfx->setTextColor(BLUE);
-		gfx->setTextSize(2);
-		gfx->setCursor(panelX + 95, yPos - 2);
-		gfx->print(absLevel);
-		yPos += rowH;
-
-		// Current Lap Time
-		gfx->setTextSize(1);
-		gfx->setTextColor(RGB565(150, 150, 150));
-		gfx->setCursor(panelX, yPos);
-		gfx->print("LAP");
-		gfx->setTextColor(lapInvalidated == "True" ? RED : WHITE);
-		gfx->setTextSize(1);
-		gfx->setCursor(panelX + 35, yPos);
-		gfx->print(currentLapTime);
+		// Right panel: delta rendering of each row (label + value redrawn together)
+		// Rows spaced 27px apart starting at y=43 → fills FH=320
+		// Row DELTA (y=43)
+		if (prevData["m_dt"] != sessionBestLiveDeltaSeconds) {
+			gfx->fillRect(PANEL_X, 43, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			bool neg = sessionBestLiveDeltaSeconds.indexOf('-') >= 0;
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 47); gfx->print("DELTA");
+			gfx->setTextColor(neg ? GRN : RD); gfx->setTextSize(2); gfx->setCursor(PANEL_X+50, 43); gfx->print(sessionBestLiveDeltaSeconds);
+			prevData["m_dt"] = sessionBestLiveDeltaSeconds;
+		}
+		// Row GAP AHEAD (y=70)
+		if (prevData["m_ga"] != driverAheadGap) {
+			gfx->fillRect(PANEL_X, 70, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 74); gfx->print("GAP+");
+			gfx->setTextColor(MGT); gfx->setTextSize(2); gfx->setCursor(PANEL_X+40, 70); gfx->print(driverAheadGap);
+			prevData["m_ga"] = driverAheadGap;
+		}
+		// Row GAP BEHIND (y=97)
+		if (prevData["m_gb"] != driverBehindGap) {
+			gfx->fillRect(PANEL_X, 97, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 101); gfx->print("GAP-");
+			gfx->setTextColor(ORNG); gfx->setTextSize(2); gfx->setCursor(PANEL_X+40, 97); gfx->print(driverBehindGap);
+			prevData["m_gb"] = driverBehindGap;
+		}
+		// Row SPD + GEAR (y=124)
+		String spdGear = speed + "|" + gear;
+		if (prevData["m_sg"] != spdGear) {
+			gfx->fillRect(PANEL_X, 124, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 128); gfx->print("SPD");
+			gfx->setTextColor(WHITE); gfx->setTextSize(2); gfx->setCursor(PANEL_X+26, 124); gfx->print(speed);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X+105, 128); gfx->print("G");
+			gfx->setTextColor(WHITE); gfx->setTextSize(2); gfx->setCursor(PANEL_X+115, 124); gfx->print(gear);
+			prevData["m_sg"] = spdGear;
+		}
+		// Row BRAKE BIAS (y=151)
+		if (prevData["m_bb"] != brakeBias) {
+			gfx->fillRect(PANEL_X, 151, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 155); gfx->print("BB");
+			gfx->setTextColor(MGT); gfx->setTextSize(2); gfx->setCursor(PANEL_X+20, 151); gfx->print(brakeBias);
+			prevData["m_bb"] = brakeBias;
+		}
+		// Row TC + ABS (y=178)
+		String tcabs = tcLevel + "|" + absLevel;
+		if (prevData["m_tcabs"] != tcabs) {
+			gfx->fillRect(PANEL_X, 178, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 182); gfx->print("TC");
+			gfx->setTextColor(YLW); gfx->setTextSize(2); gfx->setCursor(PANEL_X+20, 178); gfx->print(tcLevel);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X+80, 182); gfx->print("ABS");
+			gfx->setTextColor(BLU); gfx->setTextSize(2); gfx->setCursor(PANEL_X+108, 178); gfx->print(absLevel);
+			prevData["m_tcabs"] = tcabs;
+		}
+		// Row LAP TIME (y=205)
+		if (prevData["m_lap"] != currentLapTime) {
+			gfx->fillRect(PANEL_X, 205, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 209); gfx->print("LAP");
+			gfx->setTextColor(lapInvalidated == "True" ? RD : WHITE); gfx->setTextSize(1);
+			gfx->setCursor(PANEL_X+24, 209); gfx->print(currentLapTime);
+			prevData["m_lap"] = currentLapTime;
+		}
+		// Row FUEL (y=232)
+		if (prevData["m_fmap"] != fuelRemainingLaps) {
+			gfx->fillRect(PANEL_X, 232, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			float fv = fuelRemainingLaps.toFloat();
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 236); gfx->print("FUEL");
+			gfx->setTextColor(fv < 3.0f ? RD : GRN); gfx->setTextSize(2);
+			gfx->setCursor(PANEL_X+30, 232); gfx->print(fuelRemainingLaps);
+			prevData["m_fmap"] = fuelRemainingLaps;
+		}
+		// Row KERS (y=259)
+		if (prevData["m_kers"] != kersLevel) {
+			gfx->fillRect(PANEL_X, 259, SCREEN_WIDTH - PANEL_X, 26, BG_PAN);
+			int kv2 = kersLevel.toInt();
+			gfx->setTextColor(DIM); gfx->setTextSize(1); gfx->setCursor(PANEL_X, 263); gfx->print("ERS");
+			gfx->setTextColor(kv2 > 20 ? GRN : RD); gfx->setTextSize(2);
+			gfx->setCursor(PANEL_X+30, 259); gfx->print(kersLevel + "%");
+			prevData["m_kers"] = kersLevel;
+		}
 	}
 
 	void idle() {
@@ -1803,283 +1960,330 @@ public:
 
 	// ============================================================
 	// PAGE_499P: Ferrari 499P-inspired dashboard
-	// Layout: 480×272 (content area)
+	// Layout: 480×272
+	// Delta rendering — static frame drawn once, values only on change
 	// ============================================================
 	void draw499PPageContent() {
 		if (!canUseDisplay()) return;
 
-		// Layout constants
-		const int W = SCREEN_WIDTH;   // 480
-		const int H = SCREEN_HEIGHT;  // 272
-		const int TOP_BAR_H = 30;
-		const int BOT_BAR_H = 28;
-		const int BOT_BAR_Y = H - BOT_BAR_H;  // 244
-		const int MID_Y = TOP_BAR_H;
-		const int MID_H = BOT_BAR_Y - MID_Y;  // 214
+		const int W      = SCREEN_WIDTH;   // 480
+		const int H      = 320;            // physical height FH
+		const int TOP_H  = 40;
+		const int BOT_H  = 46;
+		const int BOT_Y  = H - BOT_H;     // 274
+		const int MID_Y  = TOP_H;          // 40
+		const int MID_H  = BOT_Y - MID_Y; // 234
 
-		// Colors (Ferrari 499P dark theme)
-		const uint16_t BG_DARK   = RGB565(10, 10, 10);
-		const uint16_t BG_HEADER = RGB565(25, 25, 30);
-		const uint16_t BG_BOTTOM = RGB565(20, 20, 25);
-		const uint16_t LABEL_CLR = RGB565(140, 140, 140);
-		const uint16_t VALUE_CLR = WHITE;
-		const uint16_t ACCENT_RED = RGB565(220, 30, 30);
-		const uint16_t ACCENT_GRN = RGB565(0, 200, 80);
-		const uint16_t TYRE_CLR  = CYAN;
+		// Colours
+		const uint16_t BG_DARK  = RGB565( 10,  10,  10);
+		const uint16_t BG_HDR   = RGB565( 22,  22,  28);
+		const uint16_t BG_BOT   = RGB565( 18,  18,  24);
+		const uint16_t BG_TC    = RGB565( 28,   6,   6);
+		const uint16_t LBL      = RGB565(130, 130, 140);
+		const uint16_t WHT      = WHITE;
+		const uint16_t RD       = RGB565(220,  30,  30);
+		const uint16_t GRN      = RGB565(  0, 200,  80);
+		const uint16_t YLW      = RGB565(230, 210,   0);
+		const uint16_t CYN      = RGB565(  0, 200, 220);
+		const uint16_t MGT      = MAGENTA;
+		const uint16_t SEP      = RGB565( 55,  55,  65);
 
-		// Column layout: TC1(50) | Left(120) | Center(140) | Right(120) | TC2(50)
-		const int TC_W = 50;
-		const int COL_L_X = TC_W;
-		const int COL_L_W = 120;
-		const int COL_C_X = COL_L_X + COL_L_W;
-		const int COL_C_W = 140;
-		const int COL_R_X = COL_C_X + COL_C_W;
-		const int COL_R_W = 120;
+		// Column x-positions (total 480px):
+		// TC1[0..49] | SPD[50..189] | GEAR/ERS[190..309] | FUEL[310..429] | TC2[430..479]
+		const int TC_W  = 50;
+		const int SL_X  = TC_W;       const int SL_W = 140;
+		const int CC_X  = SL_X+SL_W;  const int CC_W = 120;
+		const int SR_X  = CC_X+CC_W;  const int SR_W = 120;
 		const int TC2_X = W - TC_W;
+		const int TYRE_Y = MID_Y + 130; // horizontal divider y = 170
 
-		// ─── TOP BAR: LAPTIME | DELTA | FUEL ───
-		gfx->fillRect(0, 0, W, TOP_BAR_H, BG_HEADER);
+		// ── Static frame (drawn once) ─────────────────────────────
+		if (!p499FrameDrawn) {
+			gfx->fillScreen(BG_DARK);
 
-		// Laptime (left)
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(4, 3);
-		gfx->print("LAP");
-		gfx->setTextSize(2);
-		gfx->setTextColor(VALUE_CLR);
-		gfx->setCursor(30, 7);
-		gfx->print(currentLapTime);
+			// Top bar
+			gfx->fillRect(0, 0, W, TOP_H, BG_HDR);
+			gfx->drawLine(0, TOP_H, W, TOP_H, SEP);
+			gfx->setTextColor(LBL); gfx->setTextSize(1);
+			gfx->setCursor(4,      5); gfx->print("LAP");
+			gfx->setCursor(W-62,   5); gfx->print("FUEL");
 
-		// Delta (center)
-		float deltaVal = sessionBestLiveDeltaSeconds.toFloat();
-		uint16_t deltaColor = (deltaVal < 0) ? ACCENT_GRN : ACCENT_RED;
-		gfx->setTextSize(2);
-		gfx->setTextColor(deltaColor);
-		int16_t dx1, dy1; uint16_t dw, dh;
-		gfx->getTextBounds(sessionBestLiveDeltaSeconds, 0, 0, &dx1, &dy1, &dw, &dh);
-		gfx->setCursor((W - dw) / 2, 7);
-		gfx->print(sessionBestLiveDeltaSeconds);
+			// TC columns
+			gfx->fillRect(0,     MID_Y, TC_W, MID_H, BG_TC);
+			gfx->fillRect(TC2_X, MID_Y, TC_W, MID_H, BG_TC);
+			gfx->drawRect(0,     MID_Y, TC_W, MID_H, RGB565(80,30,30));
+			gfx->drawRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(80,30,30));
+			gfx->setTextColor(LBL); gfx->setTextSize(1);
+			gfx->setCursor(6,        MID_Y+4); gfx->print("TC 1");
+			gfx->setCursor(TC2_X+6, MID_Y+4); gfx->print("TC 2");
 
-		// Fuel remaining (right)
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(W - 120, 3);
-		gfx->print("FUEL");
-		gfx->setTextSize(2);
+			// Column separators
+			gfx->drawLine(SL_X,  MID_Y, SL_X,  BOT_Y, SEP);
+			gfx->drawLine(CC_X,  MID_Y, CC_X,  BOT_Y, SEP);
+			gfx->drawLine(SR_X,  MID_Y, SR_X,  BOT_Y, SEP);
+			gfx->drawLine(TC2_X, MID_Y, TC2_X, BOT_Y, SEP);
+
+			// Left col label
+			gfx->setTextColor(LBL); gfx->setTextSize(1);
+			gfx->setCursor(SL_X+5, MID_Y+4); gfx->print("SPEED km/h");
+
+			// Centre col labels
+			gfx->setCursor(CC_X+5, MID_Y+4); gfx->print("ERS");
+
+			// Right col labels
+			gfx->setCursor(SR_X+5, MID_Y+4);  gfx->print("FUEL/LAP");
+			gfx->setCursor(SR_X+5, MID_Y+50); gfx->print("LAPS LEFT");
+
+			// Horizontal divider (tyre area)
+			gfx->drawLine(SL_X, TYRE_Y, TC2_X, TYRE_Y, SEP);
+
+			// Tyre corner labels
+			int h2 = SL_W/2;
+			gfx->setTextColor(LBL);
+			gfx->setCursor(SL_X+3,    TYRE_Y+4); gfx->print("FL");
+			gfx->setCursor(SL_X+h2+3, TYRE_Y+4); gfx->print("FR");
+			gfx->setCursor(SL_X+3,    TYRE_Y+48); gfx->print("RL");
+			gfx->setCursor(SL_X+h2+3, TYRE_Y+48); gfx->print("RR");
+
+			// Centre lower: ARB labels
+			gfx->setCursor(CC_X+4,  TYRE_Y+4); gfx->print("ARB F");
+			gfx->setCursor(CC_X+64, TYRE_Y+4); gfx->print("ARB R");
+			gfx->setCursor(CC_X+30, TYRE_Y+36); gfx->print("POS");
+
+			// Right lower: brake temp labels
+			gfx->setCursor(SR_X+3,  TYRE_Y+4); gfx->print("BFL");
+			gfx->setCursor(SR_X+63, TYRE_Y+4); gfx->print("BFR");
+			gfx->setCursor(SR_X+3,  TYRE_Y+48); gfx->print("BRL");
+			gfx->setCursor(SR_X+63, TYRE_Y+48); gfx->print("BRR");
+
+			// Bottom bar
+			gfx->fillRect(0, BOT_Y, W, BOT_H, BG_BOT);
+			gfx->drawLine(0, BOT_Y, W, BOT_Y, SEP);
+			const char* bLbls[] = {"H WIND","ENG MAP","BRK BIAS","BRK MIG","SOC %","REAR %"};
+			int bCW = W/6;
+			for (int i = 0; i < 6; i++) {
+				int cx = i*bCW;
+				if (i>0) gfx->drawLine(cx, BOT_Y, cx, H, SEP);
+				gfx->setTextColor(LBL); gfx->setTextSize(1);
+				gfx->setCursor(cx+3, BOT_Y+3); gfx->print(bLbls[i]);
+			}
+
+			p499FrameDrawn = true;
+		}
+
+		// ── helpers ──────────────────────────────────────────────
+		int16_t bx, by; uint16_t bw, bh;
+		int bCW = W/6;
+		int h2 = SL_W/2;
 		float fuelVal = fuelRemainingLaps.toFloat();
-		gfx->setTextColor(fuelVal < 3.0f ? ACCENT_RED : VALUE_CLR);
-		gfx->setCursor(W - 90, 7);
-		gfx->print(fuelRemainingLaps);
+		int kv = kersLevel.toInt();
 
-		// ─── MIDDLE SECTION background ───
-		gfx->fillRect(0, MID_Y, W, MID_H, BG_DARK);
-
-		// ─── TC1 (left edge) ───
-		gfx->fillRect(0, MID_Y, TC_W, MID_H, RGB565(35, 8, 8));
-		gfx->drawRect(0, MID_Y, TC_W, MID_H, RGB565(80, 30, 30));
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(6, MID_Y + 5);
-		gfx->print("TC 1");
-		gfx->setTextSize(4);
-		gfx->setTextColor(ACCENT_RED);
-		gfx->setCursor(10, MID_Y + 22);
-		gfx->print(tcLevel);
-
-		// ─── TC2 (right edge) ───
-		gfx->fillRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(35, 8, 8));
-		gfx->drawRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(80, 30, 30));
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(TC2_X + 6, MID_Y + 5);
-		gfx->print("TC 2");
-		gfx->setTextSize(4);
-		gfx->setTextColor(ACCENT_RED);
-		gfx->setCursor(TC2_X + 10, MID_Y + 22);
-		gfx->print(tcCut);
-
-		// ─── SPEED (left column, upper) ───
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_L_X + 5, MID_Y + 5);
-		gfx->print("SPEED");
-		gfx->setTextSize(4);
-		gfx->setTextColor(VALUE_CLR);
-		// Center speed
-		gfx->getTextBounds(speed, 0, 0, &dx1, &dy1, &dw, &dh);
-		gfx->setCursor(COL_L_X + (COL_L_W - dw) / 2, MID_Y + 22);
-		gfx->print(speed);
-
-		// ─── ERS MODE (center column, upper) ───
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_C_X + 5, MID_Y + 5);
-		gfx->print("ERS MODE");
-
-		// ERS Deploy Mode value
-		gfx->setTextSize(2);
-		uint16_t ersColor = VALUE_CLR;
-		String ersModeUpper = ersDeployMode;
-		ersModeUpper.toUpperCase();
-		if (ersModeUpper == "NONE" || ersDeployMode == "--") {
-			ersColor = LABEL_CLR;
-		} else if (ersModeUpper.indexOf("ATTACK") >= 0 || ersModeUpper.indexOf("HOTLAP") >= 0) {
-			ersColor = ACCENT_RED;
-		} else if (ersModeUpper.indexOf("QUAL") >= 0) {
-			ersColor = MAGENTA;
+		// ── Top bar ───────────────────────────────────────────────
+		// Lap time
+		if (prevData["p_lap"] != currentLapTime) {
+			gfx->fillRect(28, 2, 140, 28, BG_HDR);
+			gfx->setTextColor(WHT); gfx->setTextSize(2);
+			gfx->setCursor(30, 9); gfx->print(currentLapTime);
+			prevData["p_lap"] = currentLapTime;
 		}
-		gfx->setTextColor(ersColor);
-		gfx->getTextBounds(ersDeployMode, 0, 0, &dx1, &dy1, &dw, &dh);
-		gfx->setCursor(COL_C_X + (COL_C_W - dw) / 2, MID_Y + 22);
-		gfx->print(ersDeployMode);
-
-		// KERS vertical bar (left side of center column)
-		int kersVal = kersLevel.toInt();
-		int ersBarX = COL_C_X + 5;
-		int ersBarY = MID_Y + 45;
-		int ersBarW = 10;
-		int ersBarH = 80;
-		gfx->drawRect(ersBarX, ersBarY, ersBarW, ersBarH, LABEL_CLR);
-		int fillH = (kersVal * (ersBarH - 2)) / 100;
-		uint16_t kersColor = kersVal > 50 ? ACCENT_GRN : (kersVal > 20 ? YELLOW : ACCENT_RED);
-		// Clear unfilled portion
-		int clearH = (ersBarH - 2) - fillH;
-		if (clearH > 0) {
-			gfx->fillRect(ersBarX + 1, ersBarY + 1, ersBarW - 2, clearH, BG_DARK);
+		// Delta (centred)
+		if (prevData["p_dt"] != sessionBestLiveDeltaSeconds) {
+			gfx->fillRect(190, 2, 100, 28, BG_HDR);
+			bool neg = sessionBestLiveDeltaSeconds.indexOf('-') >= 0;
+			gfx->setTextColor(neg ? GRN : RD); gfx->setTextSize(2);
+			gfx->getTextBounds(sessionBestLiveDeltaSeconds, 0,0,&bx,&by,&bw,&bh);
+			gfx->setCursor((W-bw)/2, 9); gfx->print(sessionBestLiveDeltaSeconds);
+			prevData["p_dt"] = sessionBestLiveDeltaSeconds;
 		}
-		if (fillH > 0) {
-			gfx->fillRect(ersBarX + 1, ersBarY + (ersBarH - 1 - fillH), ersBarW - 2, fillH, kersColor);
+		// Fuel
+		if (prevData["p_fl"] != fuelRemainingLaps) {
+			gfx->fillRect(W-60, 2, 58, 28, BG_HDR);
+			gfx->setTextColor(fuelVal<3.0f ? RD : WHT); gfx->setTextSize(2);
+			gfx->setCursor(W-58, 9); gfx->print(fuelRemainingLaps);
+			prevData["p_fl"] = fuelRemainingLaps;
 		}
 
-		// Gear (large) in center
-		gfx->setTextSize(6);
-		gfx->setTextColor(YELLOW);
-		gfx->getTextBounds(gear, 0, 0, &dx1, &dy1, &dw, &dh);
-		gfx->setCursor(COL_C_X + (COL_C_W - dw) / 2, MID_Y + 55);
-		gfx->print(gear);
+		// ── TC1 (left edge) ──────────────────────────────────────
+		if (prevData["p_tc1"] != tcLevel) {
+			gfx->fillRect(2, MID_Y+20, TC_W-4, MID_H-22, BG_TC);
+			gfx->setTextColor(RD); gfx->setTextSize(4);
+			gfx->setCursor(8, MID_Y+24); gfx->print(tcLevel);
+			prevData["p_tc1"] = tcLevel;
+		}
+		// ── TC2 (right edge) ─────────────────────────────────────
+		if (prevData["p_tc2"] != tcCut) {
+			gfx->fillRect(TC2_X+2, MID_Y+20, TC_W-4, MID_H-22, BG_TC);
+			gfx->setTextColor(RD); gfx->setTextSize(4);
+			gfx->setCursor(TC2_X+6, MID_Y+24); gfx->print(tcCut);
+			prevData["p_tc2"] = tcCut;
+		}
 
-		// ─── FUEL CONSUMPTION (right column, upper) ───
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_R_X + 5, MID_Y + 5);
-		gfx->print("FUEL CONS");
-		gfx->setTextSize(2);
-		gfx->setTextColor(VALUE_CLR);
-		gfx->setCursor(COL_R_X + 10, MID_Y + 22);
-		gfx->print(fuelLitersPerLap);
+		// ── SPEED (left column) ──────────────────────────────────
+		if (prevData["p_spd"] != speed) {
+			gfx->fillRect(SL_X+2, MID_Y+18, SL_W-4, TYRE_Y-MID_Y-20, BG_DARK);
+			gfx->setTextColor(WHT); gfx->setTextSize(5);
+			gfx->getTextBounds(speed,0,0,&bx,&by,&bw,&bh);
+			gfx->setCursor(SL_X+(SL_W-bw)/2, MID_Y+22);
+			gfx->print(speed);
+			prevData["p_spd"] = speed;
+		}
 
-		// Residual laps
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_R_X + 5, MID_Y + 50);
-		gfx->print("RES LAPS");
-		gfx->setTextSize(2);
-		gfx->setTextColor(fuelVal < 3.0f ? ACCENT_RED : VALUE_CLR);
-		gfx->setCursor(COL_R_X + 10, MID_Y + 66);
-		gfx->print(fuelRemainingLaps);
+		// ── GEAR (centre, large) ─────────────────────────────────
+		if (prevData["p_gr"] != gear) {
+			gfx->fillRect(CC_X+2, MID_Y+22, CC_W-4, TYRE_Y-MID_Y-24, BG_DARK);
+			gfx->setTextColor(YLW); gfx->setTextSize(7);
+			gfx->getTextBounds(gear,0,0,&bx,&by,&bw,&bh);
+			gfx->setCursor(CC_X+(CC_W-bw)/2, MID_Y+26);
+			gfx->print(gear);
+			prevData["p_gr"] = gear;
+		}
 
-		// ─── TYRE/BRAKE AREA (lower middle) ───
-		int tyreY = MID_Y + 110;
-		gfx->drawLine(COL_L_X, tyreY, TC2_X, tyreY, RGB565(60, 60, 60));
+		// ── ERS mode (above gear) ────────────────────────────────
+		if (prevData["p_ers"] != ersDeployMode) {
+			gfx->fillRect(CC_X+2, MID_Y+16, CC_W-4, 18, BG_DARK);
+			String em = ersDeployMode; em.toUpperCase();
+			uint16_t ec = WHT;
+			if (em.indexOf("ATTACK")>=0||em.indexOf("HOTLAP")>=0) ec=RD;
+			else if (em.indexOf("QUAL")>=0) ec=MGT;
+			else if (em=="NONE"||em=="--") ec=LBL;
+			gfx->setTextColor(ec); gfx->setTextSize(1);
+			gfx->setCursor(CC_X+5, MID_Y+18); gfx->print(ersDeployMode);
+			prevData["p_ers"] = ersDeployMode;
+		}
 
-		// Tyre pressures + temps (left column)
-		gfx->setTextSize(1);
-		int tHalf = COL_L_W / 2;
-		// FL
-		gfx->setTextColor(TYRE_CLR);
-		gfx->setCursor(COL_L_X + 3, tyreY + 5);
-		gfx->print(tyrePressureFrontLeft);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_L_X + 3, tyreY + 18);
-		gfx->print(tyreTemperatureFrontLeft + "C");
-		// FR
-		gfx->setTextColor(TYRE_CLR);
-		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 5);
-		gfx->print(tyrePressureFrontRight);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 18);
-		gfx->print(tyreTemperatureFrontRight + "C");
-		// RL
-		gfx->setTextColor(TYRE_CLR);
-		gfx->setCursor(COL_L_X + 3, tyreY + 54);
-		gfx->print(tyrePressureRearLeft);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_L_X + 3, tyreY + 67);
-		gfx->print(tyreTemperatureRearLeft + "C");
-		// RR
-		gfx->setTextColor(TYRE_CLR);
-		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 54);
-		gfx->print(tyrePressureRearRight);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_L_X + tHalf + 3, tyreY + 67);
-		gfx->print(tyreTemperatureRearRight + "C");
+		// ── KERS vertical bar (right side of centre col) ─────────
+		if (prevData["p_kv"] != kersLevel) {
+			const int bX=CC_X+CC_W-18, bTop=MID_Y+22, bBarW=12, bBarH=TYRE_Y-bTop-4;
+			uint16_t kc = kv>50 ? GRN : (kv>20 ? YLW : RD);
+			int fillH = (kv*(bBarH-2))/100;
+			gfx->drawRect(bX, bTop, bBarW, bBarH, LBL);
+			gfx->fillRect(bX+1, bTop+1, bBarW-2, bBarH-2, BG_DARK);
+			if (fillH>0) gfx->fillRect(bX+1, bTop+bBarH-1-fillH, bBarW-2, fillH, kc);
+			prevData["p_kv"] = kersLevel;
+		}
 
-		// Center: ARB F | POS | ARB R
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_C_X + 20, tyreY + 5);
-		gfx->print("ARB F");
-		gfx->setTextColor(VALUE_CLR);
-		gfx->setTextSize(2);
-		gfx->setCursor(COL_C_X + 22, tyreY + 18);
-		gfx->print(arbFront);
+		// ── FUEL/LAP (right column) ──────────────────────────────
+		if (prevData["p_fpl"] != fuelLitersPerLap) {
+			gfx->fillRect(SR_X+2, MID_Y+14, SR_W-4, 30, BG_DARK);
+			gfx->setTextColor(WHT); gfx->setTextSize(3);
+			gfx->setCursor(SR_X+5, MID_Y+16); gfx->print(fuelLitersPerLap);
+			prevData["p_fpl"] = fuelLitersPerLap;
+		}
+		// LAPS LEFT
+		if (prevData["p_frl"] != fuelRemainingLaps) {
+			gfx->fillRect(SR_X+2, MID_Y+58, SR_W-4, 30, BG_DARK);
+			gfx->setTextColor(fuelVal<3.0f ? RD : WHT); gfx->setTextSize(3);
+			gfx->setCursor(SR_X+5, MID_Y+60); gfx->print(fuelRemainingLaps);
+			prevData["p_frl"] = fuelRemainingLaps;
+		}
 
-		// Position
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_C_X + 55, tyreY + 40);
-		gfx->print("P");
-		gfx->setTextSize(3);
-		gfx->setTextColor(YELLOW);
-		gfx->setCursor(COL_C_X + 55, tyreY + 52);
-		gfx->print(position);
+		// ── Tyre pressures + temps ───────────────────────────────
+		struct { int cx; int cy; const String* p; const String* t; const char* k; } tyres[4] = {
+			{SL_X+3,    TYRE_Y+14, &tyrePressureFrontLeft,  &tyreTemperatureFrontLeft,  "p_tfl"},
+			{SL_X+h2+3, TYRE_Y+14, &tyrePressureFrontRight, &tyreTemperatureFrontRight, "p_tfr"},
+			{SL_X+3,    TYRE_Y+58, &tyrePressureRearLeft,   &tyreTemperatureRearLeft,   "p_trl"},
+			{SL_X+h2+3, TYRE_Y+58, &tyrePressureRearRight,  &tyreTemperatureRearRight,  "p_trr"},
+		};
+		for (auto& tr : tyres) {
+			String pv = *tr.p + "|" + *tr.t;
+			if (prevData[tr.k] != pv) {
+				gfx->fillRect(tr.cx, tr.cy, h2-4, 32, BG_DARK);
+				gfx->setTextColor(CYN); gfx->setTextSize(2);
+				gfx->setCursor(tr.cx, tr.cy); gfx->print(*tr.p);
+				gfx->setTextColor(LBL); gfx->setTextSize(1);
+				gfx->setCursor(tr.cx, tr.cy+20); gfx->print(*tr.t+"C");
+				prevData[tr.k] = pv;
+			}
+		}
 
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_C_X + 90, tyreY + 5);
-		gfx->print("ARB R");
-		gfx->setTextColor(VALUE_CLR);
-		gfx->setTextSize(2);
-		gfx->setCursor(COL_C_X + 92, tyreY + 18);
-		gfx->print(arbRear);
+		// ── ARB F / ARB R ────────────────────────────────────────
+		if (prevData["p_arbf"] != arbFront) {
+			gfx->fillRect(CC_X+2,  TYRE_Y+14, 58, 18, BG_DARK);
+			gfx->setTextColor(WHT); gfx->setTextSize(2);
+			gfx->setCursor(CC_X+4, TYRE_Y+14); gfx->print(arbFront);
+			prevData["p_arbf"] = arbFront;
+		}
+		if (prevData["p_arbr"] != arbRear) {
+			gfx->fillRect(CC_X+62, TYRE_Y+14, 56, 18, BG_DARK);
+			gfx->setTextColor(WHT); gfx->setTextSize(2);
+			gfx->setCursor(CC_X+64, TYRE_Y+14); gfx->print(arbRear);
+			prevData["p_arbr"] = arbRear;
+		}
+		// ── POSITION ─────────────────────────────────────────────
+		if (prevData["p_pos"] != position) {
+			gfx->fillRect(CC_X+2, TYRE_Y+44, CC_W-4, 22, BG_DARK);
+			gfx->setTextColor(YLW); gfx->setTextSize(2);
+			String posStr = "P"+position;
+			gfx->getTextBounds(posStr,0,0,&bx,&by,&bw,&bh);
+			gfx->setCursor(CC_X+(CC_W-bw)/2, TYRE_Y+46); gfx->print(posStr);
+			prevData["p_pos"] = position;
+		}
+		// ── GAP AHD / BHD ────────────────────────────────────────
+		if (prevData["p_gap"] != driverAheadGap+"|"+driverBehindGap) {
+			gfx->fillRect(CC_X+2, TYRE_Y+68, CC_W-4, 24, BG_DARK);
+			gfx->setTextSize(1);
+			gfx->setCursor(CC_X+4, TYRE_Y+70);
+			gfx->setTextColor(LBL); gfx->print("AHD ");
+			gfx->setTextColor(GRN); gfx->print(driverAheadGap);
+			gfx->setCursor(CC_X+4, TYRE_Y+80);
+			gfx->setTextColor(LBL); gfx->print("BHD ");
+			gfx->setTextColor(RD);  gfx->print(driverBehindGap);
+			prevData["p_gap"] = driverAheadGap+"|"+driverBehindGap;
+		}
 
-		// Brake temps (right column)
-		gfx->setTextSize(1);
-		gfx->setTextColor(LABEL_CLR);
-		gfx->setCursor(COL_R_X + 5, tyreY + 5);
-		gfx->print(brakeTemperatureFrontLeft);
-		gfx->setCursor(COL_R_X + 60, tyreY + 5);
-		gfx->print(brakeTemperatureFrontRight);
-		gfx->setCursor(COL_R_X + 5, tyreY + 54);
-		gfx->print(brakeTemperatureRearLeft);
-		gfx->setCursor(COL_R_X + 60, tyreY + 54);
-		gfx->print(brakeTemperatureRearRight);
+		// ── Brake temps ──────────────────────────────────────────
+		struct { int cx; int cy; const String* v; const char* k; } brkTemps[4] = {
+			{SR_X+3,  TYRE_Y+14, &brakeTemperatureFrontLeft,  "p_bfl"},
+			{SR_X+63, TYRE_Y+14, &brakeTemperatureFrontRight, "p_bfr"},
+			{SR_X+3,  TYRE_Y+58, &brakeTemperatureRearLeft,   "p_brl"},
+			{SR_X+63, TYRE_Y+58, &brakeTemperatureRearRight,  "p_brr"},
+		};
+		for (auto& bt : brkTemps) {
+			if (prevData[bt.k] != *bt.v) {
+				gfx->fillRect(bt.cx, bt.cy, 56, 22, BG_DARK);
+				gfx->setTextColor(WHT); gfx->setTextSize(2);
+				gfx->setCursor(bt.cx, bt.cy); gfx->print(*bt.v);
+				prevData[bt.k] = *bt.v;
+			}
+		}
+		// ── Tyre wear FL/FR ───────────────────────────────────────
+		if (prevData["p_wr"] != tyreWearFrontLeft+"|"+tyreWearFrontRight) {
+			gfx->fillRect(SL_X+2, TYRE_Y+92, SL_W-4, 10, BG_DARK);
+			gfx->setTextSize(1);
+			gfx->setCursor(SL_X+3, TYRE_Y+92);
+			gfx->setTextColor(LBL); gfx->print("WR:");
+			gfx->setTextColor(CYN); gfx->print(tyreWearFrontLeft+"%");
+			gfx->setCursor(SL_X+h2+3, TYRE_Y+92);
+			gfx->setTextColor(LBL); gfx->print("WR:");
+			gfx->setTextColor(CYN); gfx->print(tyreWearFrontRight+"%");
+			prevData["p_wr"] = tyreWearFrontLeft+"|"+tyreWearFrontRight;
+		}
+		// ── Oil / Water temp ──────────────────────────────────────
+		if (prevData["p_therm"] != oilTemperature+"|"+waterTemperature) {
+			gfx->fillRect(SR_X+2, TYRE_Y+82, SR_W-4, 12, BG_DARK);
+			gfx->setTextSize(1);
+			gfx->setCursor(SR_X+3, TYRE_Y+84);
+			gfx->setTextColor(LBL); gfx->print("OL:");
+			gfx->setTextColor(YLW); gfx->print(oilTemperature);
+			gfx->setCursor(SR_X+63, TYRE_Y+84);
+			gfx->setTextColor(LBL); gfx->print("HW:");
+			gfx->setTextColor(CYN); gfx->print(waterTemperature);
+			prevData["p_therm"] = oilTemperature+"|"+waterTemperature;
+		}
 
-		// ─── BOTTOM BAR: H WIND | ENG MAP | BRK BIAS | BRK MIG | SOC% | REAR% ───
-		gfx->fillRect(0, BOT_BAR_Y, W, BOT_BAR_H, BG_BOTTOM);
-		gfx->drawLine(0, BOT_BAR_Y, W, BOT_BAR_Y, RGB565(80, 80, 80));
-
-		int botColW = W / 6;  // 80px each
-
-		// Bottom bar cells: label + value
-		const char* botLabels[] = {"H WIND", "ENG MAP", "BRK BIAS", "BRK MIG", "SOC %", "REAR %"};
-		String botValues[] = {headWind, (popupMessage.length() > 0 ? popupMessage : String("--")), brakeBias, brkMigration, kersLevel, rearBrakeBias};
-		uint16_t botColors[] = {VALUE_CLR, VALUE_CLR, MAGENTA, VALUE_CLR, (kersVal > 20 ? ACCENT_GRN : ACCENT_RED), VALUE_CLR};
-
+		// ── Bottom bar values ─────────────────────────────────────
+		String bVals[6] = {headWind, popupMessage, brakeBias, brkMigration, kersLevel, rearBrakeBias};
+		uint16_t bClrs[6] = {WHT, WHT, MGT, WHT, kv>20?GRN:RD, WHT};
+		const char* bKeys[6] = {"p_b0","p_b1","p_b2","p_b3","p_b4","p_b5"};
 		for (int i = 0; i < 6; i++) {
-			int cellX = i * botColW;
-			// Label
-			gfx->setTextSize(1);
-			gfx->setTextColor(LABEL_CLR);
-			gfx->setCursor(cellX + 2, BOT_BAR_Y + 2);
-			gfx->print(botLabels[i]);
-			// Value
-			gfx->setTextSize(1);
-			uint16_t vColor = botColors[i];
-			if (botValues[i] == "--" || botValues[i] == "None") vColor = LABEL_CLR;
-			gfx->setTextColor(vColor);
-			gfx->setCursor(cellX + 2, BOT_BAR_Y + 15);
-			gfx->print(botValues[i]);
+			if (prevData[bKeys[i]] != bVals[i]) {
+				int cx = i*bCW;
+				gfx->fillRect(cx+1, BOT_Y+18, bCW-2, BOT_H-20, BG_BOT);
+				uint16_t vc = (bVals[i]=="--"||bVals[i]=="None") ? LBL : bClrs[i];
+				gfx->setTextColor(vc); gfx->setTextSize(2);
+				gfx->setCursor(cx+3, BOT_Y+18); gfx->print(bVals[i]);
+				prevData[bKeys[i]] = bVals[i];
+			}
 		}
 	}
 
