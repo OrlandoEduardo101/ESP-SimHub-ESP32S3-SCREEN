@@ -25,9 +25,8 @@
   <g transform="rotate(216)"> <use href="#slice" fill="#F4C542" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-228)"><tspan class="num" x="0" dy="-12">10</tspan><tspan x="0" dy="16">VOL</tspan><tspan x="0" dy="16">B</tspan></text></g>
 
   <g transform="rotate(240)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-252)"><tspan class="num" x="0" dy="-12">11</tspan><tspan x="0" dy="16">TC 2</tspan></text></g>
-  <g transform="rotate(264)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-276)"><tspan class="num" x="0" dy="-12">12</tspan><tspan x="0" dy="16">TC 3</tspan></text></g>
+  <g transform="rotate(264)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-276)"><tspan class="num" x="0" dy="-12">12</tspan><tspan x="0" dy="16">FFB</tspan></text></g>
   <g transform="rotate(288)"> <use href="#slice" fill="#E67E22" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-300)"><tspan class="num" x="0" dy="-12">13</tspan><tspan x="0" dy="16">TYRE</tspan></text></g>
-
   <g transform="rotate(312)"> <use href="#slice" fill="#27AE60" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-324)"><tspan class="num" x="0" dy="-12">14</tspan><tspan x="0" dy="16">ERS</tspan></text></g>
   <g transform="rotate(336)"> <use href="#slice" fill="#8E44AD" class="divider"/> <text class="label" transform="rotate(12) translate(0 -135) rotate(-348)"><tspan class="num" x="0" dy="-12">15</tspan><tspan x="0" dy="16">FUEL</tspan></text></g>
 

@@ -398,6 +398,6 @@ void processButtonBoxLine(const String &line) {
 	}
 
 	if (msg.length() > 0) {
-		shCustomProtocol.showPopup(msg, 2000);
+		shCustomProtocol.showPopup(msg, 3000);
 	}
 }

@@ -207,7 +207,7 @@ Os 4 sinais direcionais do 5-way joystick (slots 23–26) são convertidos em um
 ### Mapeamento no Jogo (Botões)
 - **Matrix 1–27:** mapeie diretamente as funções do jogo (BB, MAP, TC, ABS, etc).
 - **Encoders em BTN (40–55):** mapeie como "incremento/decremento".
-- **Botões Virtuais (60–69):** usados pelo MFC em modo ajuste (TC2/TC3/TYRE/VOL_A/VOL_B).
+- **Botões Virtuais (6-8, 38-39, 60-64):** usados pelo MFC em modo ajuste (TC2/FFB/TYRE/VOL_A/VOL_B).
 
 ## 9) Comandos (Manual)
 
@@ -244,7 +244,7 @@ O encoder MFC agora funciona em **dois modos**:
 - **SHIFT + MFC press curto** em **PAGE** → reseta para página 0
 - **SHIFT + MFC press curto** em **BRIGHT** → reseta para brilho 220 (padrão)
 - **SHIFT + MFC press curto** em **TC2** → TC2 no valor máximo
-- **SHIFT + MFC press curto** em **TC3** → TC3 no valor máximo
+- **SHIFT + MFC press curto** em **FFB** → FFB no valor máximo
 - **SHIFT + MFC press curto** em **TYRE** → TYRE no valor máximo
 
 ### Itens do Menu MFC (15 itens)
@@ -265,11 +265,11 @@ O encoder MFC agora funciona em **dois modos**:
 6. **BRIGHT** — ajusta brilho tela+LEDs (15-255, gira MFC, envia UART)
 7. **PAGE** — muda páginas dashboard (gira MFC → NEXT/PREV, envia UART)
 8. **VOL_SYS** — volume Windows (HID Consumer Control)
-9. **VOL_A** — botão virtual 66/67 para software mixer
-10. **VOL_B** — botão virtual 68/69 para software mixer
+9. **VOL_A** — botão virtual 7/8 para software mixer
+10. **VOL_B** — botão virtual 38/39 para software mixer
 11. **TC2** — botão virtual 60/61 (mapeia no jogo)
-12. **TC3** — botão virtual 62/63 (mapeia no jogo)
-13. **TYRE** — botão virtual 64/65 (mapeia no jogo)
+12. **FFB** — botão virtual 62/63 (mapeia no jogo)
+13. **TYRE** — botão virtual 64/6 (mapeia no jogo)
 14. **ERS** — cicla entre ERS MODES (BALANCED → HARVEST → DEPLOY → HOTLAP)
 15. **FUEL** — mistura combustível (LEAN ↔ RICH, gira MFC)
 
@@ -299,18 +299,18 @@ O encoder MFC agora funciona em **dois modos**:
 #### VOL_SYS (Volume Windows - HID Consumer Control)
 - Pressione MFC no item **VOL_SYS**
 - **Gire MFC** → Volume+/- (HID Consumer Control, reconhecido pelo Windows)
-- **Botão RADIO** (slot 10) → MUTE (quando VOL_SYS ativo)
-- **Botão FLASH** (slot 11) → PLAY/PAUSE (quando VOL_SYS ativo)
+- **Botão RADIO** (slot 13) → MUTE (quando VOL_SYS ativo)
+- **Botão FLASH** (slot 14) → PLAY/PAUSE (quando VOL_SYS ativo)
 - Pressione MFC → sai
 
 #### VOL_A, VOL_B (Volume Apps via Botões)
 - Pressione MFC em **VOL_A** ou **VOL_B**
-- Gire MFC CW → botão UP (66 ou 68), CCW → botão DN (67 ou 69)
+- Gire MFC CW → botão UP (7 ou 38), CCW → botão DN (8 ou 39)
 - Mapeia em software de mixer (EarTrumpet, VoiceMeeter, etc)
 - Pressione MFC → sai
 
-#### TC2, TC3, TYRE (Botões Virtuais do Jogo)
-- Pressione MFC em **TC2**, **TC3** ou **TYRE**
+#### TC2, FFB, TYRE (Botões Virtuais do Jogo)
+- Pressione MFC em **TC2**, **FFB** ou **TYRE**
 - Gire MFC CW → botão UP, CCW → botão DN
 - No jogo, mapeia os botões para funções (ex: TC Map Up/Down)
 - Pressione MFC → sai
@@ -334,22 +334,24 @@ O encoder MFC agora funciona em **dois modos**:
 - **Clutches (Z/Rz):** podem ser mapeadas como embreagem, freio ou acelerador (modo DUAL permite uso independente).
 - **ENC_MODE = BTN**: cada encoder vira dois botões (CW/CCW) para funções de incremento/decremento.
 
-## 10) Botões Virtuais HID (60-69)
+## 10) Botões Virtuais HID (MFC menu ajuste)
 
-Enviados pelo encoder MFC em modo ajuste:
+Enviados pelo encoder MFC em modo ajuste (IDs dentro do descriptor de 64 botões):
 
 | Botão | Função | Usado por | Modo |
 |-------|--------|-----------|------|
+| 6 | TYRE DN | Menu MFC | Ajuste |
+| 7 | VOL_A UP | Menu MFC | Ajuste |
+| 8 | VOL_A DN | Menu MFC | Ajuste |
+| 38 | VOL_B UP | Menu MFC | Ajuste |
+| 39 | VOL_B DN | Menu MFC | Ajuste |
 | 60 | TC2 UP | Menu MFC | Ajuste |
 | 61 | TC2 DN | Menu MFC | Ajuste |
-| 62 | TC3 UP | Menu MFC | Ajuste |
-| 63 | TC3 DN | Menu MFC | Ajuste |
+| 62 | FFB UP | Menu MFC | Ajuste |
+| 63 | FFB DN | Menu MFC | Ajuste |
 | 64 | TYRE UP | Menu MFC | Ajuste |
-| 65 | TYRE DN | Menu MFC | Ajuste |
-| 66 | VOL_A UP | Menu MFC | Ajuste |
-| 67 | VOL_A DN | Menu MFC | Ajuste |
-| 68 | VOL_B UP | Menu MFC | Ajuste |
-| 69 | VOL_B DN | Menu MFC | Ajuste |
+
+**Nota:** IDs 6/7/8 são slots fisicamente vazios na matriz (nunca soldados), portanto não há conflito com botões físicos. IDs 65-69 ultrapassariam o limite de 64 botões do descriptor HID e não foram usados.
 
 ## 11) HID Consumer Control (Multimídia)
 
@@ -369,18 +371,104 @@ Quando **VOL_SYS** está em modo de ajuste:
 - GPIOs 35–37 e 3/46 devem ser testados no hardware real.
 - **VOL_SYS multimídia** requer que o Windows reconheça o USB HID Consumer Control automaticamente.
 - **VOL_A e VOL_B** dependem de software de mixer instalado no PC (EarTrumpet, VoiceMeeter, etc).
-- **TC2, TC3, TYRE** devem ser mapeados dentro do jogo para as funções desejadas.
+- **TC2, FFB, TYRE** devem ser mapeados dentro do jogo para as funções desejadas.
 
 ## 13) Tabela de Resumo de IDs
 
 | Intervalo | Uso | Quantidade | Observações |
 |-----------|-----|------------|-------------|
-| 1–22 | Botões matriz (HID) | 22 | Físicos, reportados ao HID |
+| 1–5 | Botões matriz (HID) | 5 | MFC SW + ENC2-5 SW |
+| 6–8 | MFC virtual TYRE DN / VOL_A | 3 | Slots vazios na matriz, usados como virtuais |
+| 9–37 | Botões matriz (HID) | 29 | Físicos (exceto 23-26 que viram HAT) |
 | 23–26 | HAT/POV (5-way dir.) | 4 | Convertidos em HAT switch, **não** botões |
 | 27 | 5-way center click | 1 | HID button 27 (OK/confirm) |
 | 28 | SHIFT | 1 | Interno, não reportado ao HID |
+| 38–39 | MFC virtual VOL_B | 2 | Acima de MATRIX_HID_MAX=37, sem conflito |
 | 40–55 | Encoders BTN mode | 16 | Virtuais, 2 botões cada (8 encoders) |
-| 60–69 | MFC menu (ajuste) | 10 | Virtuais, 2 botões cada (5 itens) |
-| **Total** | **Livres** | **até 64** | Espaço para expansão futura |
+| 56–59 | SHIFT+ENC2-5 (BTN) | 4 | Virtuais, shift combos |
+| 60–64 | MFC menu (ajuste) | 5 | TC2 UP/DN, FFB UP/DN, TYRE UP |
+| **Total** | **Livres dentro de 64** | vários | Slots 15-16, 23-24, 31-32 livres p/ expansão |
 
-**Sem conflitos:** matriz física (1–22, 27) vs. HAT (23–26) vs. encoders virtuais (40–55) vs. MFC virtuais (60–69).
+**Sem conflitos:** IDs 6-8 são slots fisicamente vazios na matriz (nunca soldados). Botões físicos terminam no slot 37 (MATRIX_HID_MAX). IDs 38-64 são exclusivamente virtuais.
+
+## 14) Camada SHIFT (Consumer Control — Dispositivo 2 no Content Manager)
+
+O firmware registra dois dispositivos HID no USB: **Gamepad** (64 botões + eixos + HAT) e **Consumer Control** (volume/mídia). O Content Manager do Assetto Corsa mostra ambos como dispositivos separados com o nome "ESP-ButtonBox-WHEEL".
+
+A **camada SHIFT** aproveita o Consumer Control como segundo dispositivo de botões: quando SHIFT está pressionado, certos botões e encoders enviam usage IDs do Consumer Control em vez do botão normal do Gamepad. Isso **dobra** as funções disponíveis sem alterar o hardware.
+
+### Regras do SHIFT Layer
+- **SHIFT suprime o botão normal**: SHIFT+Frontal1 NÃO dispara o botão 17 do Gamepad — apenas o CC
+- **Borboletas são IMUNES**: SHIFT+Borboleta sempre troca marcha (segurança em corrida)
+- **Combos existentes preservados**: SHIFT+MFC, SHIFT+ENC2-5 rotação, SHIFT+Clutch continuam iguais
+
+### Mídia Direta (sem precisar do MFC)
+
+| Combo | Ação | Consumer Control |
+|---|---|---|
+| SHIFT + RADIO (slot 13) | Mute toggle | 0xE2 |
+| SHIFT + FLASH (slot 14) | Play/Pause | 0xCD |
+
+### Troca de Página WT32 (UART)
+
+| Combo | Ação | UART |
+|---|---|---|
+| SHIFT + Traseiro 1 (slot 35) | Próxima página | `$PAGE:NEXT:` |
+| SHIFT + Traseiro 2 (slot 36) | Página anterior | `$PAGE:PREV:` |
+
+### Botões Extras de Jogo (Consumer Control → Device 2 no CM)
+
+Cada combo SHIFT+botão envia um CC usage ID, que o Content Manager vê como botão no segundo dispositivo. Mapear no jogo como qualquer outro botão.
+
+| Combo | CC Usage | Sugestão de Uso |
+|---|---|---|
+| SHIFT + Frontal 1 (slot 17) | 0x01 | Ignição / Starter |
+| SHIFT + Frontal 2 (slot 18) | 0x02 | Pit Limiter |
+| SHIFT + Frontal 3 (slot 19) | 0x03 | Wiper |
+| SHIFT + Frontal 4 (slot 20) | 0x04 | Headlights |
+| SHIFT + Frontal 5 (slot 21) | 0x05 | Rain Light |
+| SHIFT + Frontal 6 (slot 22) | 0x06 | Flash Light |
+| SHIFT + Frontal 7 (slot 37) | 0x07 | HUD toggle |
+| SHIFT + Extra 1 (slot 9) | 0x08 | Camera cycle |
+| SHIFT + Extra 2 (slot 10) | 0x09 | Look back |
+| SHIFT + Extra 3 (slot 11) | 0x0A | Pit request |
+| SHIFT + Extra 4 (slot 12) | 0x0B | Chat / Spotter |
+| SHIFT + 5-way CENTER (slot 29) | 0x0E | MFD cycle |
+| SHIFT + ENC2 SW (slot 2) | 0x0F | BB reset |
+| SHIFT + ENC3 SW (slot 3) | 0x10 | MAP reset |
+| SHIFT + ENC4 SW (slot 4) | 0x11 | TC reset |
+| SHIFT + ENC5 SW (slot 5) | 0x12 | ABS reset |
+
+### 5-Way Joystick com SHIFT (Consumer Control)
+
+Quando SHIFT está ativo, o 5-way envia CC em vez de HAT/D-Pad:
+
+| Combo | CC Usage | Sugestão |
+|---|---|---|
+| SHIFT + 5-way UP (slot 25) | 0x1B | MFD Up |
+| SHIFT + 5-way DOWN (slot 26) | 0x1C | MFD Down |
+| SHIFT + 5-way LEFT (slot 27) | 0x1D | MFD Left |
+| SHIFT + 5-way RIGHT (slot 28) | 0x1E | MFD Right |
+
+**Nota:** O HAT/D-Pad fica inativo enquanto SHIFT é segurado. Soltar SHIFT restaura o HAT normalmente.
+
+### Encoders Laterais com SHIFT (Consumer Control)
+
+Os encoders ENC6–ENC9 (laterais) ganham função extra via SHIFT:
+
+| Combo | CC CW / CCW | Sugestão |
+|---|---|---|
+| SHIFT + ENC6 (Lateral 1) | 0x13 / 0x14 | Turbo adjust |
+| SHIFT + ENC7 (Lateral 2) | 0x15 / 0x16 | Engine brake |
+| SHIFT + ENC8 (Lateral 3) | 0x17 / 0x18 | Diff adjust |
+| SHIFT + ENC9 (Lateral 4) | 0x19 / 0x1A | MGU-K deploy |
+
+### Como Mapear no Content Manager / Assetto Corsa
+
+1. No Content Manager, abra **Settings → Controls**
+2. O segundo dispositivo "ESP-ButtonBox-WHEEL" aparece (é o Consumer Control)
+3. Clique no campo do binding desejado
+4. Segure SHIFT no volante + pressione o botão — o CM detecta o "botão" no Device 2
+5. Confirme o binding
+
+**Total:** 30 novas funções SHIFT (2 mídia + 2 UART page + 18 botões CC + 8 encoders CC).

@@ -1201,18 +1201,140 @@ const char* ersModeNames[ERS_COUNT] = {
 
 // Virtual buttons for MFC menu items (all IDs must be <= 64 to fit HID descriptor)
 // IDs 60-63: TC2 UP/DN (60/61), FFB UP/DN (62/63); 62/63 also used by SHIFT+TC2 = TC3 function
-// IDs 35-39, 64: TYRE UP/DN, VOL_A UP/DN, VOL_B UP/DN (remapped from 65-69 which exceeded limit)
+// IDs 6/7/8, 38/39, 64: TYRE UP/DN, VOL_A UP/DN, VOL_B UP/DN
+// IMPORTANT: IDs 6/7/8 are physically empty matrix slots (never wired) → safe for virtual use
+// Previous IDs 35/36/37 conflicted with physical Traseiro1/2 and Frontal7 (all <= MATRIX_HID_MAX=37)
 VirtualButtonPulse mfcVirtualButtons[10] = {
     {60, false, 0}, {61, false, 0}, // TC2 UP/DN
     {62, false, 0}, {63, false, 0}, // FFB UP/DN (shared: SHIFT+TC2 also fires 62/63)
-    {64, false, 0}, {35, false, 0}, // TYRE UP / TYRE DN (35 was 65)
-    {36, false, 0}, {37, false, 0}, // VOL_A UP/DN (36-37 were 66-67)
-    {38, false, 0}, {39, false, 0}  // VOL_B UP/DN (38-39 were 68-69)
+    {64, false, 0}, { 6, false, 0}, // TYRE UP (64) / TYRE DN (6) — was 35, conflicted
+    { 7, false, 0}, { 8, false, 0}, // VOL_A UP (7) / VOL_A DN (8) — were 36/37, conflicted
+    {38, false, 0}, {39, false, 0}  // VOL_B UP/DN (no conflict: 38/39 > MATRIX_HID_MAX)
 };
 
 // Matrix button slots for multimedia (when VOL_SYS active)
 static const uint8_t BUTTON_RADIO = 13;  // Slot 13 = MUTE   (GPB1/GPA4)
 static const uint8_t BUTTON_FLASH = 14;  // Slot 14 = PLAY/PAUSE (GPB1/GPA5)
+
+// ================================
+// SHIFT LAYER (Consumer Control)
+// ================================
+// Forward declarations (defined later in the file)
+void uartSend(const char* cat, const char* func, const char* val);
+
+// Slots immune to SHIFT (always fire gamepad button, never CC)
+// Borboletas must always work as gear shift — safety in racing
+static bool isShiftImmune(uint8_t slot) {
+    return slot == 33 || slot == 34;  // Borboleta UP/DOWN
+}
+
+// Map matrix slot → Consumer Control usage ID for SHIFT layer
+// 0 = no SHIFT function for this slot
+// Special values: 0xFFE2 = Mute, 0xFFCD = Play/Pause, 0xFFF1/0xFFF2 = UART PAGE
+static const uint16_t SHIFT_SLOT_NONE  = 0;
+static const uint16_t SHIFT_UART_NEXT  = 0xFFF1;  // UART PAGE:NEXT
+static const uint16_t SHIFT_UART_PREV  = 0xFFF2;  // UART PAGE:PREV
+static const uint16_t SHIFT_MEDIA_MUTE = 0xFFE2;  // Consumer Mute (0xE2)
+static const uint16_t SHIFT_MEDIA_PLAY = 0xFFCD;  // Consumer Play/Pause (0xCD)
+
+// Slot → CC usage (index = slot number, 0-based would be slot-1, but we use slot directly)
+// Only slots with SHIFT functions are non-zero
+static const uint16_t SHIFT_CC_MAP[] = {
+    //  0     1     2     3     4     5     6     7     8
+        0,    0, 0x0F, 0x10, 0x11, 0x12,    0,    0,    0,  // 0-8  (2-5: ENC SW)
+    // 9    10    11    12    13          14          15    16
+     0x08, 0x09, 0x0A, 0x0B, SHIFT_MEDIA_MUTE, SHIFT_MEDIA_PLAY, 0, 0,  // 9-16
+    // 17   18    19    20    21    22    23    24
+     0x01, 0x02, 0x03, 0x04, 0x05, 0x06,    0,    0,  // 17-24 (frontais)
+    // 25          26          27          28          29    30    31    32
+     0x1B,      0x1C,      0x1D,      0x1E,      0x0E,  0,    0,    0,  // 25-32 (5-way + center)
+    // 33   34    35                36                37
+        0,    0, SHIFT_UART_NEXT, SHIFT_UART_PREV, 0x07,  // 33-37 (borb immune, tras→UART, frnt7)
+};
+static const uint8_t SHIFT_CC_MAP_SIZE = sizeof(SHIFT_CC_MAP) / sizeof(SHIFT_CC_MAP[0]);
+
+// SHIFT+ENC6-9 CW/CCW Consumer Control usage IDs
+// ENC6 CW/CCW = 0x13/0x14, ENC7 = 0x15/0x16, ENC8 = 0x17/0x18, ENC9 = 0x19/0x1A
+static const uint16_t SHIFT_ENC_LATERAL_CC[8] = {
+    0x13, 0x14,  // ENC6 (Lateral 1) CW / CCW
+    0x15, 0x16,  // ENC7 (Lateral 2) CW / CCW
+    0x17, 0x18,  // ENC8 (Lateral 3) CW / CCW
+    0x19, 0x1A   // ENC9 (Lateral 4) CW / CCW
+};
+
+// Send a momentary Consumer Control pulse (press + delay + release)
+void sendShiftCC(uint16_t usageId) {
+    ConsumerControl.press(usageId);
+    delay(30);
+    ConsumerControl.release();
+}
+
+// Track SHIFT+button state to handle release properly
+// When SHIFT is held and a button goes DOWN, we suppress the gamepad bit
+// and fire the CC action. When the button goes UP, we must NOT clear a
+// gamepad bit that was never set.
+static bool shiftConsumed[65] = {false};  // true if this slot's press was consumed by SHIFT
+
+// Handle a SHIFT+matrix button press/release
+// Returns true if the button was consumed (caller should NOT set gamepad bit)
+bool handleShiftMatrixButton(uint8_t buttonNum, bool pressed) {
+    if (!isButtonPressed(BUTTON_SHIFT)) return false;
+    if (isShiftImmune(buttonNum)) return false;
+    if (buttonNum >= SHIFT_CC_MAP_SIZE) return false;
+
+    uint16_t ccId = SHIFT_CC_MAP[buttonNum];
+    if (ccId == SHIFT_SLOT_NONE) return false;
+
+    if (pressed) {
+        shiftConsumed[buttonNum] = true;
+
+        if (ccId == SHIFT_MEDIA_MUTE) {
+            sendShiftCC(0xE2);
+            uartSend("MEDIA", "MUTE", "1");
+            DBGF("[SHIFT] Slot %u → MUTE", (unsigned)buttonNum);
+        } else if (ccId == SHIFT_MEDIA_PLAY) {
+            sendShiftCC(0xCD);
+            uartSend("MEDIA", "PLAY_PAUSE", "1");
+            DBGF("[SHIFT] Slot %u → PLAY/PAUSE", (unsigned)buttonNum);
+        } else if (ccId == SHIFT_UART_NEXT) {
+            uartSend("PAGE", "NEXT", "");
+            DBGF("[SHIFT] Slot %u → PAGE NEXT (UART)", (unsigned)buttonNum);
+        } else if (ccId == SHIFT_UART_PREV) {
+            uartSend("PAGE", "PREV", "");
+            DBGF("[SHIFT] Slot %u → PAGE PREV (UART)", (unsigned)buttonNum);
+        } else {
+            // Standard CC button for game binding
+            sendShiftCC(ccId);
+            DBGF("[SHIFT] Slot %u → CC 0x%02X", (unsigned)buttonNum, ccId);
+        }
+    } else {
+        // Release: if this press was consumed by SHIFT, don't touch gamepad bit
+        if (shiftConsumed[buttonNum]) {
+            shiftConsumed[buttonNum] = false;
+            return true;  // Consumed — don't clear gamepad bit (it was never set)
+        }
+    }
+
+    return pressed;  // Consume press events, but allow normal release if not shift-consumed
+}
+
+// Handle SHIFT+lateral encoder (ENC6-9) step
+// Returns true if consumed (caller should skip normal axis/button handling)
+bool handleShiftLateralEncoder(uint8_t encIdx, int8_t step) {
+    // encIdx 5-8 = ENC6-9 (lateral encoders)
+    if (!isButtonPressed(BUTTON_SHIFT)) return false;
+    if (encIdx < 5 || encIdx > 8) return false;
+
+    uint8_t lateralIdx = (encIdx - 5) * 2;  // 0,2,4,6
+    uint16_t ccId = (step > 0) ? SHIFT_ENC_LATERAL_CC[lateralIdx]
+                               : SHIFT_ENC_LATERAL_CC[lateralIdx + 1];
+    sendShiftCC(ccId);
+    DBGF("[SHIFT] ENC%u %s → CC 0x%02X",
+         (unsigned)(encIdx + 1),
+         (step > 0) ? "CW" : "CCW",
+         ccId);
+    return true;
+}
 
 // ================================
 // UTILITIES
@@ -1366,10 +1488,16 @@ void saveConfig() {
     prefs.putBool("encBtn", encoderButtonMode);
     prefs.putUChar("ersMode", ersMode);
     prefs.putUChar("fuelVal", (uint8_t)fuelValue);
+    prefs.putBool("clSwap", clutchChannelsSwapped);
+    prefs.putUChar("bright", (uint8_t)constrain(brightnessValue, 15, 255));
+    prefs.putUChar("pageVal", (uint8_t)constrain(pageValue, 0, 6));
 }
 
 void loadConfig() {
-    clutchCfg.mode = CLUTCH_DUAL;
+    // Load clutch mode from NVS (persists across reboots)
+    uint8_t savedMode = prefs.getUChar("clMode", CLUTCH_DUAL);
+    if (savedMode > CLUTCH_SINGLE_R) savedMode = CLUTCH_DUAL;  // sanity check
+    clutchCfg.mode = (ClutchMode)savedMode;
     // Load saved calibration; default to a sensible narrow range (not 0-4095)
     // so both halls register movement even before a proper calibration is done.
     clutchCfg.hallMinA = prefs.getUShort("h1min", 1400);
@@ -1399,6 +1527,15 @@ void loadConfig() {
     fuelValue = prefs.getUChar("fuelVal", 50);
     if (fuelValue < 0) fuelValue = 0;
     if (fuelValue > 100) fuelValue = 100;
+    clutchChannelsSwapped = prefs.getBool("clSwap", false);
+    brightnessValue = prefs.getUChar("bright", 220);
+    if (brightnessValue < 15) brightnessValue = 15;
+    pageValue = prefs.getUChar("pageVal", 0);
+    if (pageValue < 0) pageValue = 0;
+    if (pageValue > 6) pageValue = 0;
+    // Restore last MFC position so knob stays in sync after reboot
+    mfcIndex = (int8_t)prefs.getUChar("mfcIdx", 0);
+    if (mfcIndex < 0 || mfcIndex >= MFC_COUNT) mfcIndex = 0;
 }
 
 int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
@@ -1529,10 +1666,22 @@ void scanButtonMatrix() {
                         DBG(reading ? "[SHIFT] DOWN" : "[SHIFT] UP");
                     }
 
-                    // 5-way directions → update HAT switch (not individual buttons)
+                    // SHIFT layer: intercept before normal HID processing
+                    // 5-way directions → SHIFT sends CC, normal sends HAT
                     if (isFivewayDirection(buttonNum)) {
-                        updateHatFromMatrix();
-                        sendGamepad();
+                        if (isButtonPressed(BUTTON_SHIFT) && reading) {
+                            // SHIFT+5-way: send Consumer Control instead of HAT
+                            if (buttonNum < SHIFT_CC_MAP_SIZE && SHIFT_CC_MAP[buttonNum] != SHIFT_SLOT_NONE) {
+                                sendShiftCC(SHIFT_CC_MAP[buttonNum]);
+                                DBGF("[SHIFT] 5-way slot %u → CC 0x%02X", (unsigned)buttonNum, SHIFT_CC_MAP[buttonNum]);
+                            }
+                        } else {
+                            // Normal: update HAT switch
+                            updateHatFromMatrix();
+                            sendGamepad();
+                        }
+                    } else if (handleShiftMatrixButton(buttonNum, reading)) {
+                        // SHIFT consumed this button → skip normal gamepad bit
                     } else if (buttonNum <= HID_MAX_BUTTONS && shouldReportMatrixButton(buttonNum)) {
                         if (reading) {
                             buttons |= (1ULL << (buttonNum - 1));
@@ -1652,23 +1801,24 @@ void handleMfcRotate(int8_t step) {
             snprintf(buf, sizeof(buf), "%d", brightnessValue);
             uartSend("BRIGHT", "VAL", buf);
             ledApplyBrightness(brightnessValue);
-            // Round wheel: update MAX7219 intensity and WS2812 luminance
             if (roundWheelMode) {
                 uint8_t max7219Int = map(constrain(brightnessValue, 15, 255), 15, 255, 0, 15);
                 max7219SetIntensity(max7219Int);
                 ws2812Strip.SetLuminance(constrain(brightnessValue, 0, 255));
             }
+            saveConfig();
         } else if (item == MFC_PAGE) {
             pageValue += step;
             if (pageValue < 0) pageValue = 6;
             if (pageValue > 6) pageValue = 0;
+            saveConfig();
             uartSend("PAGE", step > 0 ? "NEXT" : "PREV", "");
         } else if (item == MFC_VOL_SYS) {
             // HID Consumer Control Volume (implemented separately)
             sendConsumerControl(step > 0 ? 0xE9 : 0xEA); // Volume Up/Down
         } else if (item == MFC_VOL_A) {
-            // Virtual buttons 36 (UP) / 37 (DN)
-            triggerVirtualButton(step > 0 ? 36 : 37);
+            // Virtual buttons 7 (UP) / 8 (DN)
+            triggerVirtualButton(step > 0 ? 7 : 8);
             sendGamepad();
         } else if (item == MFC_VOL_B) {
             // Virtual buttons 38 (UP) / 39 (DN)
@@ -1683,8 +1833,8 @@ void handleMfcRotate(int8_t step) {
             triggerVirtualButton(step > 0 ? 62 : 63);
             sendGamepad();
         } else if (item == MFC_TYRE) {
-            // Virtual buttons 64 (UP) / 35 (DN)
-            triggerVirtualButton(step > 0 ? 64 : 35);
+            // Virtual buttons 64 (UP) / 6 (DN)
+            triggerVirtualButton(step > 0 ? 64 : 6);
             sendGamepad();
         } else if (item == MFC_ERS) {
             ersMode = (ersMode + 1) % ERS_COUNT;
@@ -1704,6 +1854,7 @@ void handleMfcRotate(int8_t step) {
         mfcIndex += step;
         if (mfcIndex < 0) mfcIndex = MFC_COUNT - 1;
         if (mfcIndex >= MFC_COUNT) mfcIndex = 0;
+        prefs.putUChar("mfcIdx", (uint8_t)mfcIndex);  // persist across reboots
         uartSend("MFC", "NAV", mfcMenuNames[mfcIndex]);
         ledTriggerSweep(step > 0);  // CW → L→R sweep, CCW → R→L sweep
     }
@@ -1762,7 +1913,10 @@ void scanEncoders() {
             if (i == 0) {
                 handleMfcRotate(step);
             } else {
-                if (encoderButtonMode) {
+                // SHIFT+ENC6-9 (lateral): Consumer Control layer
+                if (handleShiftLateralEncoder(i, step)) {
+                    // Consumed by SHIFT CC layer — skip normal handling
+                } else if (encoderButtonMode) {
                     handleEncoderButton(i, step);
                 } else {
                     // AXIS mode: SHIFT + ENC2-5 fires virtual button instead of moving axis
@@ -2249,6 +2403,7 @@ void handleShiftClutchCombo() {
         // Toggle persistent channel inversion (updateClutches applies it every frame)
         clutchChannelsSwapped = !clutchChannelsSwapped;
         clutchSwapped = true;
+        saveConfig();
         uartSend("CLUTCH", "SWAP", clutchChannelsSwapped ? "ON" : "OFF");
         sendGamepad();
         return;
@@ -2307,10 +2462,11 @@ void setup() {
 
     prefs.begin("wheel", false);
     loadConfig();
-    // Sem encoders/MFC disponíveis, força modo previsível para teste dos halls
-    clutchCfg.mode = CLUTCH_DUAL;
-    clutchChannelsSwapped = false;
     DBG("[BOOT] Preferences loaded");
+    DBGF("[BOOT] clutchMode=%u bite=%u encBtn=%d swap=%d bright=%d page=%d",
+         (unsigned)clutchCfg.mode, (unsigned)clutchCfg.bitePoint,
+         encoderButtonMode ? 1 : 0, clutchChannelsSwapped ? 1 : 0,
+         brightnessValue, pageValue);
 
     // Configure ADC for Hall sensors (0-3.3V range)
     // analogSetPinAttenuation internally calls IDF adc1_config_channel_atten which

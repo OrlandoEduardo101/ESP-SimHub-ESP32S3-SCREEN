@@ -79,13 +79,13 @@ Sai e volta ao modo navegação
 - Windows reconhece automaticamente
 
 ### 8️⃣ VOL_A (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 66 (UP)
-- **Giro MFC CCW**: Botão HID virtual 67 (DN)
+- **Giro MFC CW**: Botão HID virtual 7 (UP)
+- **Giro MFC CCW**: Botão HID virtual 8 (DN)
 - Mapeia em software de mixer (EarTrumpet, VoiceMeeter)
 
 ### 9️⃣ VOL_B (Modo Ajuste)
-- **Giro MFC CW**: Botão HID virtual 68 (UP)
-- **Giro MFC CCW**: Botão HID virtual 69 (DN)
+- **Giro MFC CW**: Botão HID virtual 38 (UP)
+- **Giro MFC CCW**: Botão HID virtual 39 (DN)
 - Independente de VOL_A, usa software mixer
 
 ### 🔟 TC2 (Modo Ajuste)
@@ -93,14 +93,14 @@ Sai e volta ao modo navegação
 - **Giro MFC CCW**: Botão HID virtual 61 (DN)
 - Mapeia no jogo para: TC Map Up/Down
 
-### 1️⃣1️⃣ TC3 (Modo Ajuste)
+### 1️⃣1️⃣ FFB (Modo Ajuste)
 - **Giro MFC CW**: Botão HID virtual 62 (UP)
 - **Giro MFC CCW**: Botão HID virtual 63 (DN)
-- Mapeia no jogo para: TC 3-way Up/Down
+- Mapeia no jogo para: Force Feedback Up/Down
 
 ### 1️⃣2️⃣ TYRE (Modo Ajuste)
 - **Giro MFC CW**: Botão HID virtual 64 (UP)
-- **Giro MFC CCW**: Botão HID virtual 65 (DN)
+- **Giro MFC CCW**: Botão HID virtual 6 (DN)
 - Mapeia no jogo para: Compound Up/Down, Tire Pressure, etc
 
 ### 1️⃣3️⃣ ERS (Um clique - F1/Hybrid)
@@ -162,10 +162,10 @@ $CALIB:INVALID:HALL   (calibração inválida, valores resetados)
 | Botão | Item | CW | CCW | Para Mapear |
 |-------|------|----|----|------------|
 | 60-61 | TC2 | UP | DN | TC Map 1/2/3 |
-| 62-63 | TC3 | UP | DN | TC Range/Mode |
-| 64-65 | TYRE | UP | DN | Compound/Pressure |
-| 66-67 | VOL_A | UP | DN | Software Mixer |
-| 68-69 | VOL_B | UP | DN | Software Mixer |
+| 62-63 | FFB | UP | DN | Force Feedback |
+| 64 / 6 | TYRE | UP | DN | Compound/Pressure |
+| 7 / 8 | VOL_A | UP | DN | Software Mixer |
+| 38 / 39 | VOL_B | UP | DN | Software Mixer |
 
 ---
 
@@ -181,6 +181,8 @@ Quando **VOL_SYS** está em modo de ajuste:
 | FLASH | 0xCD (Play/Pause) | ✅ Sim |
 
 Relatório HID via classe nativa `USBHIDConsumerControl` do framework Espressif32.
+
+> **Atalho SHIFT:** Volume/Mute/Play também funcionam via SHIFT + RADIO/FLASH (sem precisar entrar no MFC). Ver seção 14 do MANUAL_BUTTONBOX.md.
 
 ---
 
@@ -259,7 +261,7 @@ enum MfcMenuItem : uint8_t {
     MFC_VOL_A,
     MFC_VOL_B,
     MFC_TC2,
-    MFC_TC3,
+    MFC_FFB,
     MFC_TYRE,
     MFC_ERS,
     MFC_FUEL,
