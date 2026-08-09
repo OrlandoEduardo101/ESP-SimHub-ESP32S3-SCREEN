@@ -186,9 +186,9 @@ isnull([DataCorePlugin.GameData.NewData.Gear],'N') + ';' +
 format([CarSettings_CurrentDisplayedRPMPercent],'0') + ';' +
 format([CarSettings_RPMRedLineSetting],'0') + ';' +
 format([DataCorePlugin.GameData.NewData.Rpms],'0') + ';' +
-format([CurrentLapTime], 'mm\:ss\.fff') + ';' +
-format([LastLapTime], 'mm\:ss\.fff') + ';' +
-format([BestLapTime], 'mm\:ss\.fff') + ';' +
+format([CurrentLapTime], 'mm\\:ss\\.fff') + ';' +
+format([LastLapTime], 'mm\\:ss\\.fff') + ';' +
+format([BestLapTime], 'mm\\:ss\\.fff') + ';' +
 format([PersistantTrackerPlugin.SessionBestLiveDeltaSeconds],'0.000') + ';' +
 format([PersistantTrackerPlugin.SessionBestLiveDeltaProgressSeconds],'0.00') + ';' +
 [LapInvalidated] + ';' +
@@ -219,7 +219,7 @@ isnull(format([PersistantTrackerPlugin.DriverAhead_00_Gap], '0.0'), '--') + ';' 
 isnull(format([PersistantTrackerPlugin.DriverBehind_00_Gap], '0.0'), '--') + ';' +
 format([DataCorePlugin.Computed.Fuel_RemainingLaps], '0.0') + ';' +
 format([DataCorePlugin.Computed.Fuel_LitersPerLap], '0.00') + ';' +
-format([SessionTimeLeft], 'hh\:mm\:ss') + ';' +
+format([SessionTimeLeft], 'hh\\:mm\\:ss') + ';' +
 if([DataCorePlugin.GameData.NewData.Flag_Checkered]>0,'Checkered',
 if([DataCorePlugin.GameData.NewData.Flag_Orange]>0,'Orange',
 if([DataCorePlugin.GameData.NewData.Flag_Black]>0,'Black',
@@ -254,9 +254,9 @@ format([TyreWearFrontLeft], '0') + ';' +
 format([TyreWearFrontRight], '0') + ';' +
 format([TyreWearRearLeft], '0') + ';' +
 format([TyreWearRearRight], '0') + ';' +
-isnull(format([Sector1Time], 'ss\.fff'), '00.000') + ';' +
-isnull(format([Sector2Time], 'ss\.fff'), '00.000') + ';' +
-isnull(format([Sector3Time], 'ss\.fff'), '00.000') + ';' +
+isnull(format([Sector1Time], 'ss\\.fff'), '00.000') + ';' +
+isnull(format([Sector2Time], 'ss\\.fff'), '00.000') + ';' +
+isnull(format([Sector3Time], 'ss\\.fff'), '00.000') + ';' +
 format([AirTemperature], '0') + ';' +
 format([RoadTemperature], '0') + ';' +
 if([CarSettings_CurrentDisplayedRPMPercent] >= 95, 1, 0) + ';' +

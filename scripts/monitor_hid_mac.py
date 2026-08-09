@@ -174,41 +174,57 @@ class HidTester:
         return out
 
     def run_live_monitor(self) -> None:
-        print("Monitor ativo — pressione botões/encoders/halls. Ctrl+C para sair.\n")
-        pressed: Set[int] = set()
+        print("Monitor ativo — pressione botões/encoders/halls. Ctrl+C para sair.")
+        print("Auto-reconexão ativa: o script aguarda a placa voltar automaticamente.\n")
         try:
             while True:
-                for event in pygame.event.get():
-                    if event.type == pygame.JOYBUTTONDOWN:
-                        raw = event.button + 1
-                        mapped = self._map_button_id(raw)
-                        label = BUTTON_LABELS.get(mapped, "(sem rótulo)")
-                        pressed.add(raw)
-                        print(f"[BTN {mapped:02d}] ▼ PRESS   {label}")
-                    elif event.type == pygame.JOYBUTTONUP:
-                        raw = event.button + 1
-                        mapped = self._map_button_id(raw)
-                        label = BUTTON_LABELS.get(mapped, "(sem rótulo)")
-                        pressed.discard(raw)
-                        print(f"[BTN {mapped:02d}] ▲ release {label}")
-                    elif event.type == pygame.JOYAXISMOTION:
-                        if not self.no_axis:
-                            axis_id = event.axis
-                            if axis_id in self.hide_axes:
+                try:
+                    self.poll_events(verbose=True)
+                except pygame.error:
+                    pass  # joystick handle inválido, trata no bloco abaixo
+
+                # Verifica se o joystick ainda está inicializado
+                try:
+                    alive = self.joystick.get_init() and self.joystick.get_numbuttons() >= 0
+                except pygame.error:
+                    alive = False
+
+                if not alive:
+                    print("\n[DISC] Dispositivo desconectado. Aguardando reconexão...")
+                    self.joystick.quit() if self.joystick.get_init() else None
+
+                    reconnected = False
+                    while not reconnected:
+                        time.sleep(1.0)
+                        pygame.joystick.quit()
+                        pygame.joystick.init()
+                        for i in range(pygame.joystick.get_count()):
+                            try:
+                                js = pygame.joystick.Joystick(i)
+                                js.init()
+                                if "ESP-ButtonBox-WHEEL" in js.get_name():
+                                    self.joystick = js
+                                    reconnected = True
+                                    break
+                            except pygame.error:
                                 continue
-                            if self.show_axes is not None and axis_id not in self.show_axes:
-                                continue
-                            value = float(event.value)
-                            prev = self.state.axes.get(axis_id, 0.0)
-                            self.state.axes[axis_id] = value
-                            if abs(value - prev) >= self.axis_change and (abs(value) >= self.deadzone or abs(prev) >= self.deadzone):
-                                print(f"[AXIS {axis_id}] {value:+.3f}")
-                    elif event.type == pygame.JOYHATMOTION:
-                        hat = tuple(event.value)
-                        self.state.hat = hat
-                        dirs = {(0,1):"UP",(0,-1):"DOWN",(-1,0):"LEFT",(1,0):"RIGHT",(0,0):"CENTER"}
-                        name = dirs.get(hat, str(hat))
-                        print(f"[HAT ] {name}")
+                        if not reconnected and pygame.joystick.get_count() > 0:
+                            # Fallback: reconnect to any device if named one not found yet
+                            try:
+                                js = pygame.joystick.Joystick(0)
+                                js.init()
+                                if "ButtonBox" in js.get_name() or "WHEEL" in js.get_name():
+                                    self.joystick = js
+                                    reconnected = True
+                            except pygame.error:
+                                pass
+
+                    self.state = RuntimeState(axes={}, buttons={}, hat=(0, 0))
+                    print(f"[CONN] Reconectado: {self.joystick.get_name()} "
+                          f"(axes={self.joystick.get_numaxes()} "
+                          f"buttons={self.joystick.get_numbuttons()})\n")
+                    pygame.event.clear()
+
                 time.sleep(0.005)
         except KeyboardInterrupt:
             print("\nMonitor finalizado.")

@@ -1469,6 +1469,7 @@ void uartRoundtripTask() {
     uartPingSentAtMs = now;
 
     uartSendInt("BB", "PING", (int)uartPingPendingSeq);
+    // uartSend("BRIGHT", "VAL", "220");  // Força o brilho a cada PING para tentar acordar o WT32
     DBGF("[UART] PING seq=%u", (unsigned)uartPingPendingSeq);
 }
 
@@ -2521,6 +2522,9 @@ void setup() {
     } else {
         DBG("[MODE] F1 wheel mode (PCA9685 detected, UART to WT32)");
     }
+    // Force brightness to 220 in case the WT32 is alive but dim
+    // uartSend("BRIGHT", "VAL", "220");
+    // delay(50);
 
     uartSend("SYS", "BOOT", DEVICE_NAME);
     if (!roundWheelMode) {
