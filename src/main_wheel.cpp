@@ -1121,15 +1121,43 @@ bool calibratingHall = false;
 bool adjustingBite = false;
 
 // Hall/clutch anti-noise (helps when halls are not connected yet)
-static const uint8_t CLUTCH_RAW_FILTER_SHIFT = 4;  // IIR: 1/16 — light smoothing after median; keeps response fast
-static const int8_t  CLUTCH_AXIS_DEADZONE = 10;    // minimum HID delta to report (suppresses ~±30 count idle jitter)
-static const uint8_t HALL_MEDIAN_SAMPLES = 7;       // odd number — median rejects random spikes regardless of magnitude
-bool     clutchFilterInit = false;
-int32_t  clutchRawAFiltered = 0;
-int32_t  clutchRawBFiltered = 0;
-static const bool HALL_RAW_DEBUG = true;
+static const uint8_t HALL_MEDIAN_SAMPLES  = 7;     // odd — median rejects spikes of any magnitude
+static const uint8_t HALL_ENDPOINT_MARGIN = 4;     // % of range to clamp to ±127 at extremes
+static const uint8_t CLUTCH_CALIB_SHRINK  = 3;     // % to shrink each end after calibration (user needn't hit hard stop)
+static const int8_t  CLUTCH_HYSTERESIS    = 4;     // counts — axis must move this far in same dir to update HID
+static const bool    HALL_RAW_DEBUG       = true;
 static const unsigned long HALL_RAW_DEBUG_MS = 100;
 unsigned long lastHallRawDebugMs = 0;
+
+// Kalman 1D filter state (one per hall channel)
+// Process noise Q: how much we trust the sensor moving; Measurement noise R: ADC noise estimate.
+// For a Hall on ESP32 ADC (12-bit, ~±15 count noise): R≈225, Q≈1 gives crisp yet smooth tracking.
+struct Kalman1D {
+    float x;      // state estimate (filtered value)
+    float p;      // estimate error covariance
+    float q;      // process noise covariance
+    float r;      // measurement noise covariance
+    bool  init;
+    Kalman1D() : x(0), p(1), q(1.0f), r(225.0f), init(false) {}
+    float update(float measurement) {
+        if (!init) { x = measurement; init = true; return x; }
+        // Predict
+        p = p + q;
+        // Update
+        float k = p / (p + r);   // Kalman gain
+        x = x + k * (measurement - x);
+        p = (1.0f - k) * p;
+        return x;
+    }
+    void reset(float measurement) { x = measurement; p = 1; init = true; }
+};
+
+Kalman1D kalmanA;
+Kalman1D kalmanB;
+
+// Hysteresis state: track last reported axis value and direction
+int8_t hallLastReportedA = 0;
+int8_t hallLastReportedB = 0;
 
 // Hall sensor presence detection (tested at boot via ADC variance)
 bool hallAConnected = false;
@@ -1541,10 +1569,16 @@ void loadConfig() {
 
 int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
     if (maxV <= minV) return 0;
-    int16_t val = raw - minV;
-    if (val < 0) val = 0;
-    if (val > (int16_t)(maxV - minV)) val = maxV - minV;
-    return (int8_t)map(val, 0, maxV - minV, -127, 127);
+    int32_t span = (int32_t)(maxV - minV);
+    int32_t val  = (int32_t)raw - (int32_t)minV;
+    val = constrain(val, 0, span);
+    // Endpoint clamp: last HALL_ENDPOINT_MARGIN% of travel → force to ±127.
+    // Guarantees games always see 100% axis even if user didn't reach hard stop during cal.
+    int32_t margin = (span * HALL_ENDPOINT_MARGIN) / 100;
+    if (val <= margin)          return -127;
+    if (val >= span - margin)   return  127;
+    // Map interior range to -127..127 (excluding the clamped margins)
+    return (int8_t)map(val - margin, 0, span - 2 * margin, -127, 127);
 }
 
 // Forward declarations
@@ -1987,7 +2021,7 @@ static void sortU16(uint16_t* arr, uint8_t n) {
     }
 }
 
-// Median of HALL_MEDIAN_SAMPLES readings — immune to spikes of any magnitude
+// Median of HALL_MEDIAN_SAMPLES readings — immune to spikes of any magnitude.
 // Settling delay between consecutive reads prevents ADC channel crosstalk.
 static uint16_t hallReadMedian(uint8_t pin) {
     uint16_t buf[HALL_MEDIAN_SAMPLES];
@@ -1997,6 +2031,19 @@ static uint16_t hallReadMedian(uint8_t pin) {
     }
     sortU16(buf, HALL_MEDIAN_SAMPLES);
     return buf[HALL_MEDIAN_SAMPLES / 2];
+}
+
+// Apply directional hysteresis: only accept a new axis value if it moves
+// at least CLUTCH_HYSTERESIS counts in the same direction as the last change.
+// This eliminates the 1-2 count chatter at a stable position without hiding
+// real movement. Returns true if the caller should update the HID report.
+static bool applyHysteresis(int8_t newVal, int8_t& lastReported) {
+    int8_t delta = newVal - lastReported;
+    if (abs(delta) >= CLUTCH_HYSTERESIS) {
+        lastReported = newVal;
+        return true;
+    }
+    return false;
 }
 
 // Detect if a hall sensor is physically connected by reading ADC variance.
@@ -2050,44 +2097,42 @@ void updateClutches() {
     // Skip entirely if no hall sensors connected — axes stay at 0
     if (!hallAConnected && !hallBConnected) return;
 
-    // Read Hall with median filter; extra delay between channels prevents crosstalk
+    // Step 1: Median filter — reads HALL_MEDIAN_SAMPLES times, returns middle value.
+    // Immune to ADC spikes of any magnitude (cosmic rays, EMI).
     uint16_t rawA = hallAConnected ? hallReadMedian(HALL_A_PIN) : (uint16_t)((clutchCfg.hallMinA + clutchCfg.hallMaxA) / 2);
     delayMicroseconds(50);
     uint16_t rawB = hallBConnected ? hallReadMedian(HALL_B_PIN) : (uint16_t)((clutchCfg.hallMinB + clutchCfg.hallMaxB) / 2);
+
+    // Step 2: Kalman 1D filter — tracks real movement while rejecting Gaussian ADC noise.
+    // More effective than IIR: adapts gain based on uncertainty rather than a fixed fraction.
+    float kfA = kalmanA.update((float)rawA);
+    float kfB = kalmanB.update((float)rawB);
+
+    uint16_t filtA = (uint16_t)constrain((int32_t)kfA, 0, 4095);
+    uint16_t filtB = (uint16_t)constrain((int32_t)kfB, 0, 4095);
 
     if (HALL_RAW_DEBUG) {
         unsigned long nowMs = millis();
         if (nowMs - lastHallRawDebugMs >= HALL_RAW_DEBUG_MS) {
             lastHallRawDebugMs = nowMs;
-            int8_t dbgA = mapHallToAxis(rawA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
-            int8_t dbgB = mapHallToAxis(rawB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
-            DBGF("[HALL RAW] GPIO4=%u GPIO2=%u | filt A=%ld B=%ld | mapped A=%d B=%d | cal A[%u-%u] B[%u-%u]",
-                rawA, rawB, clutchRawAFiltered, clutchRawBFiltered, dbgA, dbgB,
+            int8_t dbgA = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
+            int8_t dbgB = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
+            DBGF("[HALL] raw A=%u B=%u | kalman A=%.1f B=%.1f | axis A=%d B=%d | cal A[%u-%u] B[%u-%u]",
+                rawA, rawB, kfA, kfB, dbgA, dbgB,
                 clutchCfg.hallMinA, clutchCfg.hallMaxA,
                 clutchCfg.hallMinB, clutchCfg.hallMaxB);
         }
     }
 
-    // Low-pass raw hall readings to suppress floating input jitter
-    if (!clutchFilterInit) {
-        clutchRawAFiltered = rawA;
-        clutchRawBFiltered = rawB;
-        clutchFilterInit = true;
-    } else {
-        clutchRawAFiltered += ((int32_t)rawA - clutchRawAFiltered) >> CLUTCH_RAW_FILTER_SHIFT;
-        clutchRawBFiltered += ((int32_t)rawB - clutchRawBFiltered) >> CLUTCH_RAW_FILTER_SHIFT;
-    }
-
-    uint16_t filtA = (uint16_t)constrain(clutchRawAFiltered, 0, 4095);
-    uint16_t filtB = (uint16_t)constrain(clutchRawBFiltered, 0, 4095);
-
+    // During calibration: track raw min/max extremes (no filtering — we want real limits)
     if (calibratingHall) {
-        if (filtA < clutchCfg.hallMinA) clutchCfg.hallMinA = filtA;
-        if (filtA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = filtA;
-        if (filtB < clutchCfg.hallMinB) clutchCfg.hallMinB = filtB;
-        if (filtB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = filtB;
+        if (rawA < clutchCfg.hallMinA) clutchCfg.hallMinA = rawA;
+        if (rawA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = rawA;
+        if (rawB < clutchCfg.hallMinB) clutchCfg.hallMinB = rawB;
+        if (rawB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = rawB;
     }
 
+    // Step 3: Map to -127..127 with endpoint clamp (mapHallToAxis handles it)
     int8_t a = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
     int8_t b = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
 
@@ -2162,10 +2207,14 @@ void updateClutches() {
         finalB = 0;
     }
 
-    // Report only meaningful clutch changes to avoid noise spam on floating inputs
-    if (abs(finalA - axisZ) >= CLUTCH_AXIS_DEADZONE || abs(finalB - axisRZ) >= CLUTCH_AXIS_DEADZONE) {
-        axisZ = finalA;
-        axisRZ = finalB;
+    // Step 4: Directional hysteresis — only update HID report when the axis
+    // moves at least CLUTCH_HYSTERESIS counts in a sustained direction.
+    // Eliminates 1-2 count chatter at a stable resting position.
+    bool changedA = applyHysteresis(finalA, hallLastReportedA);
+    bool changedB = applyHysteresis(finalB, hallLastReportedB);
+    if (changedA || changedB) {
+        axisZ  = hallLastReportedA;
+        axisRZ = hallLastReportedB;
         sendGamepad();
     }
 }
@@ -2344,7 +2393,27 @@ void handleMfcPress() {
                         saveConfig();
                         uartSend("CALIB", "INVALID", "HALL");
                     } else {
+                        // Apply shrinkage: expand endpoints inward by CLUTCH_CALIB_SHRINK% of span.
+                        // This way the sensor reaches ±127 before hitting the mechanical hard stop,
+                        // compensating for users who don't squeeze the paddle all the way.
+                        uint16_t spanA = clutchCfg.hallMaxA - clutchCfg.hallMinA;
+                        uint16_t spanB = clutchCfg.hallMaxB - clutchCfg.hallMinB;
+                        uint16_t shrinkA = (spanA * CLUTCH_CALIB_SHRINK) / 100;
+                        uint16_t shrinkB = (spanB * CLUTCH_CALIB_SHRINK) / 100;
+                        clutchCfg.hallMinA = (clutchCfg.hallMinA + shrinkA < clutchCfg.hallMaxA) ? clutchCfg.hallMinA + shrinkA : clutchCfg.hallMinA;
+                        clutchCfg.hallMaxA = (clutchCfg.hallMaxA > shrinkA) ? clutchCfg.hallMaxA - shrinkA : clutchCfg.hallMaxA;
+                        clutchCfg.hallMinB = (clutchCfg.hallMinB + shrinkB < clutchCfg.hallMaxB) ? clutchCfg.hallMinB + shrinkB : clutchCfg.hallMinB;
+                        clutchCfg.hallMaxB = (clutchCfg.hallMaxB > shrinkB) ? clutchCfg.hallMaxB - shrinkB : clutchCfg.hallMaxB;
+                        // Reset Kalman filters so stale estimates don't persist after new cal bounds
+                        kalmanA.init = false;
+                        kalmanB.init = false;
+                        hallLastReportedA = 0;
+                        hallLastReportedB = 0;
                         saveConfig();
+                        DBGF("[CALIB] Done. A[%u-%u] B[%u-%u] (shrink=%u/%u counts)",
+                            clutchCfg.hallMinA, clutchCfg.hallMaxA,
+                            clutchCfg.hallMinB, clutchCfg.hallMaxB,
+                            shrinkA, shrinkB);
                         uartSend("CALIB", "DONE", "HALL");
                     }
                 }
