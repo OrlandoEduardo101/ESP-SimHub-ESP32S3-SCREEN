@@ -1121,10 +1121,15 @@ bool calibratingHall = false;
 bool adjustingBite = false;
 
 // Hall/clutch anti-noise (helps when halls are not connected yet)
-static const uint8_t HALL_MEDIAN_SAMPLES  = 7;     // odd — median rejects spikes of any magnitude
-static const uint8_t HALL_ENDPOINT_MARGIN = 4;     // % of range to clamp to ±127 at extremes
-static const uint8_t CLUTCH_CALIB_SHRINK  = 3;     // % to shrink each end after calibration (user needn't hit hard stop)
-static const int8_t  CLUTCH_HYSTERESIS    = 4;     // counts — axis must move this far in same dir to update HID
+static const uint8_t HALL_MEDIAN_SAMPLES  = 7;    // odd — median rejects spikes of any magnitude
+static const uint8_t HALL_REST_MARGIN     = 8;    // % of range to clamp to -127 at the REST end.
+                                                    // Larger than press margin: sensor sits at mechanical
+                                                    // rest during cal, so noise easily pushes it above min.
+                                                    // Equivalent to the shim trick — done in software.
+static const uint8_t HALL_PRESS_MARGIN    = 4;    // % of range to clamp to +127 at the PRESSED end.
+                                                    // Smaller: shrinkage already handles the hard-stop gap.
+static const uint8_t CLUTCH_CALIB_SHRINK  = 3;    // % to shrink each end after calibration (user needn't hit hard stop)
+static const int8_t  CLUTCH_HYSTERESIS    = 4;    // counts — axis must move this far in same dir to update HID
 static const bool    HALL_RAW_DEBUG       = true;
 static const unsigned long HALL_RAW_DEBUG_MS = 100;
 unsigned long lastHallRawDebugMs = 0;
@@ -1572,13 +1577,16 @@ int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
     int32_t span = (int32_t)(maxV - minV);
     int32_t val  = (int32_t)raw - (int32_t)minV;
     val = constrain(val, 0, span);
-    // Endpoint clamp: last HALL_ENDPOINT_MARGIN% of travel → force to ±127.
-    // Guarantees games always see 100% axis even if user didn't reach hard stop during cal.
-    int32_t margin = (span * HALL_ENDPOINT_MARGIN) / 100;
-    if (val <= margin)          return -127;
-    if (val >= span - margin)   return  127;
-    // Map interior range to -127..127 (excluding the clamped margins)
-    return (int8_t)map(val - margin, 0, span - 2 * margin, -127, 127);
+    // Asymmetric endpoint clamp:
+    //  REST end  (val near 0):    HALL_REST_MARGIN%  — wider, software equivalent of the shim trick.
+    //  PRESS end (val near span): HALL_PRESS_MARGIN% — narrower, shrinkage already closes the gap.
+    int32_t restMargin  = (span * HALL_REST_MARGIN)  / 100;
+    int32_t pressMargin = (span * HALL_PRESS_MARGIN) / 100;
+    if (val <= restMargin)            return -127;
+    if (val >= span - pressMargin)    return  127;
+    // Map the interior (between the two margins) to -127..127
+    int32_t interior = span - restMargin - pressMargin;
+    return (int8_t)map(val - restMargin, 0, interior, -127, 127);
 }
 
 // Forward declarations
