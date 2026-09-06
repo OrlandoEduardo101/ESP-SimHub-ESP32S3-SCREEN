@@ -464,7 +464,10 @@ public:
       Serial.println(WiFi.status());
     }
 #endif
-    clearTerminal(this->gfx);
+    // Not clearTerminal() here: that does a full fillScreen(BLACK), which
+    // would wipe the loading-screen logo drawn by shCustomProtocol.setup()
+    // before the first SimHub frame arrives. Just overlay the status text,
+    // same as the config-portal messages above.
     terminalPrintln("Connected, IP:", this->gfx);
     terminalPrintln(WiFi.localIP().toString(), this->gfx);
 
