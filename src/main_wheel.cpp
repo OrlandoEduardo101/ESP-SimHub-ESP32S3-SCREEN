@@ -11,6 +11,12 @@
 
 #define DEVICE_NAME "ESP-ButtonBox-WHEEL"
 
+// Diagnostic build switch — set to 0 for normal firmware. When 1, the BLE
+// radio is powered up at the very top of setup(), before every other
+// peripheral, to isolate a brownout caused by the radio itself from one
+// caused by the board's total load. See setup() and docs/WIRELESS.md.
+#define BLE_EARLY_INIT_TEST 1
+
 // I2C pins
 #define I2C_SDA 8
 #define I2C_SCL 9
@@ -114,6 +120,7 @@ CustomGamepad Gamepad;
 USBHIDConsumerControl ConsumerControl;
 
 
+
 int8_t axisX = 0;      // Enc 2
 int8_t axisY = 0;      // Enc 3
 int8_t axisZ = 0;      // Clutch A
@@ -184,9 +191,142 @@ static const int UART_TX_PIN = 43;
 #define DBG(msg) ButtonBoxSerial.println(msg)
 #define DBGF(...) { char _dbuf[128]; snprintf(_dbuf, sizeof(_dbuf), __VA_ARGS__); ButtonBoxSerial.println(_dbuf); }
 
+// ================================
+// BLE HID GAMEPAD (opt-in, default OFF)
+// ================================
+// Alternative to the USB gamepad above, for wireless/casual use. USB stays
+// the default (lowest latency); BLE is toggled via a hidden SHIFT+MFC-hold
+// gesture (see toggleBleMode()) and only sends reports when active, so the
+// two never fight over the same input even though the USB HID interface
+// itself can't be unplugged from the wire at runtime (TinyUSB descriptors
+// are fixed at boot). Reuses customGamepadDescriptor verbatim as the BLE
+// HID Report Map — the byte layout is transport-agnostic.
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
+
+bool bleEnabled = false;  // persisted preference (Preferences "bleEn")
+bool bleActive = false;   // whether the BLE stack is currently running
+bool bleConnected = false;
+
+NimBLEServer* bleServer = nullptr;
+NimBLEHIDDevice* bleHid = nullptr;
+NimBLECharacteristic* bleInputGamepad = nullptr;
+
+class BleGamepadServerCallbacks : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* pServer) override {
+        bleConnected = true;
+        DBG("[BLE] Host connected");
+    }
+    void onDisconnect(NimBLEServer* pServer) override {
+        bleConnected = false;
+        DBG("[BLE] Host disconnected");
+        // NimBLEServer auto-restarts advertising on disconnect by default.
+    }
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+        DBGF("[BLE] Auth complete: encrypted=%d authenticated=%d bonded=%d",
+             desc->sec_state.encrypted ? 1 : 0,
+             desc->sec_state.authenticated ? 1 : 0,
+             desc->sec_state.bonded ? 1 : 0);
+    }
+};
+
+// Step-by-step logging here is deliberate: BLE bring-up is the one part of
+// this firmware that can hard-fault or hang, and the only way to see where
+// is the debug UART (DBG goes out ButtonBoxSerial/CH340). Keep the traces.
+void bleGamepadInit() {
+    if (bleActive) return;
+
+    DBGF("[BLE] init start, freeHeap=%u largestBlock=%u",
+         (unsigned)ESP.getFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap());
+
+    NimBLEDevice::init(DEVICE_NAME);
+    DBGF("[BLE] step 1: NimBLEDevice::init OK, freeHeap=%u", (unsigned)ESP.getFreeHeap());
+
+    // TX power deliberately NOT at max. +9dBm (ESP_PWR_LVL_P9) draws big
+    // current bursts while advertising, which can brown-out a board fed
+    // through a marginal USB supply — a reset loop that looks exactly like
+    // a firmware crash. +3dBm is ample for a wheel sitting a metre from the
+    // PC. Raise only if range is actually a problem AND power is solid.
+    NimBLEDevice::setPower(ESP_PWR_LVL_P3);
+
+    // HID over GATT requires a bonded/encrypted link before the host will
+    // read reports. Without this, Windows (and some other hosts) hang
+    // forever on "Connecting..." because the security handshake it expects
+    // never happens. No display/keyboard on this device -> "Just Works"
+    // pairing: bonding yes, MITM no (nothing to confirm a passkey with),
+    // secure connections yes.
+    NimBLEDevice::setSecurityAuth(true, false, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+    DBG("[BLE] step 2: security configured (bond=1 mitm=0 sc=1, JustWorks)");
+
+    bleServer = NimBLEDevice::createServer();
+    bleServer->setCallbacks(new BleGamepadServerCallbacks());
+    DBG("[BLE] step 3: server created");
+
+    bleHid = new NimBLEHIDDevice(bleServer);
+    bleHid->manufacturer(std::string("SimRacing_DIY"));
+    bleHid->pnp(0x02, 0x303A, 0x8172, 1);
+    bleHid->hidInfo(0x00, 0x01);
+    bleHid->reportMap((uint8_t*)customGamepadDescriptor, sizeof(customGamepadDescriptor));
+    DBGF("[BLE] step 4: HID device built, reportMap=%u bytes",
+         (unsigned)sizeof(customGamepadDescriptor));
+
+    bleInputGamepad = bleHid->inputReport(HID_REPORT_ID_GAMEPAD);
+    DBGF("[BLE] step 5: input report id=%u %s",
+         (unsigned)HID_REPORT_ID_GAMEPAD,
+         bleInputGamepad ? "OK" : "NULL!");
+
+    bleHid->startServices();
+    DBG("[BLE] step 6: services started");
+
+    bleHid->setBatteryLevel(100);
+
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    adv->setAppearance(HID_GAMEPAD);
+    adv->addServiceUUID(bleHid->hidService()->getUUID());
+    adv->setScanResponse(true);
+    bool advOk = adv->start();
+    DBGF("[BLE] step 7: advertising start=%d, freeHeap=%u",
+         advOk ? 1 : 0,
+         (unsigned)ESP.getFreeHeap());
+
+    bleActive = true;
+    DBG("[BLE] init complete");
+}
+
+void bleGamepadDeinit() {
+    if (!bleActive) return;
+    NimBLEDevice::deinit(true);
+    bleServer = nullptr;
+    bleHid = nullptr;
+    bleInputGamepad = nullptr;
+    bleActive = false;
+    bleConnected = false;
+}
+
 void scanI2CBusDebug();
 void uartRoundtripTask();
 void handleWt32UartRx();
+
+// Why did we just boot? Distinguishes a firmware crash (PANIC/WDT) from a
+// power problem (BROWNOUT) — they look identical from the outside (board
+// keeps resetting) but have completely different fixes.
+const char* wheelResetReasonStr() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:  return "POWERON";
+        case ESP_RST_EXT:      return "EXT";
+        case ESP_RST_SW:       return "SW";
+        case ESP_RST_PANIC:    return "PANIC (crash)";
+        case ESP_RST_INT_WDT:  return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT:      return "WDT";
+        case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT (power)";
+        case ESP_RST_SDIO:     return "SDIO";
+        default:               return "UNKNOWN";
+    }
+}
 
 // ================================
 // ROUND WHEEL MODE
@@ -1058,6 +1198,10 @@ const int8_t ENC_TABLE[16] = {
 bool encoderButtonMode = false;
 const unsigned long MODE_HOLD_MS = 1500;       // Long press for ENC mode toggle
 const unsigned long SHORT_PRESS_MS = 500;      // Short press for presets
+// Hidden wireless-toggle gesture thresholds (SHIFT+hold MFC, see handleMfcPress()):
+// parked on CALIB, released within [MODE_HOLD_MS, WIFI_PORTAL_HOLD_MS) = WiFi
+// toggle; held past WIFI_PORTAL_HOLD_MS = force WiFi captive portal.
+const unsigned long WIFI_PORTAL_HOLD_MS = 4000;
 unsigned long comboHoldStart = 0;
 unsigned long mfcPressStart = 0;               // Track MFC press time for short/long detection
 bool clutchSwapped = false;         // per-press guard: prevents re-trigger while paddles held
@@ -1406,7 +1550,14 @@ void sendGamepad() {
         axisVx,     // Vx     → axis 8
         axisVy      // Vy     → axis 9
     };
-    Gamepad.sendReport(&report, sizeof(report));
+    if (bleEnabled) {
+        if (bleActive && bleConnected && bleInputGamepad) {
+            bleInputGamepad->setValue((uint8_t*)&report, sizeof(report));
+            bleInputGamepad->notify();
+        }
+    } else {
+        Gamepad.sendReport(&report, sizeof(report));
+    }
 }
 
 
@@ -1525,6 +1676,7 @@ void saveConfig() {
     prefs.putBool("clSwap", clutchChannelsSwapped);
     prefs.putUChar("bright", (uint8_t)constrain(brightnessValue, 15, 255));
     prefs.putUChar("pageVal", (uint8_t)constrain(pageValue, 0, 6));
+    prefs.putBool("bleEn", bleEnabled);
 }
 
 void loadConfig() {
@@ -1567,9 +1719,32 @@ void loadConfig() {
     pageValue = prefs.getUChar("pageVal", 0);
     if (pageValue < 0) pageValue = 0;
     if (pageValue > 6) pageValue = 0;
+    bleEnabled = prefs.getBool("bleEn", false);
     // Restore last MFC position so knob stays in sync after reboot
     mfcIndex = (int8_t)prefs.getUChar("mfcIdx", 0);
     if (mfcIndex < 0 || mfcIndex >= MFC_COUNT) mfcIndex = 0;
+}
+
+// Hidden gesture target (see handleMfcPress(), SHIFT+MFC-hold on MFC_RESET):
+// hot-toggles BLE HID on/off without a reboot. Live-switchable because
+// NimBLE init/advertising is comparatively fast and self-contained, unlike
+// the screen's WiFi bridge (see docs/WIRELESS.md).
+void toggleBleMode() {
+    bleEnabled = !bleEnabled;
+    if (bleEnabled) {
+        // Breadcrumb BEFORE init and preference saved only AFTER it returns:
+        // if BLE bring-up hard-faults, the reboot finds "bleEn" still false
+        // (or the breadcrumb set) and comes back up with BLE off instead of
+        // boot-looping. See the guard in setup().
+        prefs.putBool("bleBoot", true);
+        bleGamepadInit();
+        prefs.putBool("bleBoot", false);
+    } else {
+        bleGamepadDeinit();
+    }
+    saveConfig();
+    uartSend("BLE", "STATE", bleEnabled ? "ON" : "OFF");
+    DBGF("[BLE] %s", bleEnabled ? "ENABLED" : "DISABLED");
 }
 
 int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
@@ -2273,33 +2448,56 @@ void handleMfcPress() {
     if (mfcPressed && shiftPressed) {
         if (mfcPressStart == 0) {
             mfcPressStart = millis();
-        } else {
+        } else if (mfcPressStart != UINT32_MAX) {
             unsigned long holdTime = millis() - mfcPressStart;
+            MfcMenuItem item = (MfcMenuItem)mfcIndex;
 
-            // Long press (>= 1.5s): Toggle ENC_MODE (any item)
-            if (holdTime >= MODE_HOLD_MS) {
-                encoderButtonMode = !encoderButtonMode;
+            // Hidden gesture (no new sticker entry): SHIFT+hold MFC parked on
+            // the printed CALIB item, held past WIFI_PORTAL_HOLD_MS, force-opens
+            // the screen's WiFi captive portal on its next reboot. Fires on
+            // crossing (not release) so it doesn't also fire the WIFI:TOGGLE
+            // release-bucket below. See docs/WIRELESS.md.
+            if (item == MFC_CALIB && holdTime >= WIFI_PORTAL_HOLD_MS) {
+                uartSend("WIFI", "PORTAL", "");
+                mfcPressStart = UINT32_MAX;  // Prevent repeat
+                DBGF("[MFC HOLD] CALIB -> WIFI PORTAL (hold=%lums)", holdTime);
+            } else if (item != MFC_CALIB && holdTime >= MODE_HOLD_MS) {
+                // Long press (>= 1.5s) on any item except CALIB (handled above,
+                // release-gated below) and RESET (hidden BLE toggle, see below).
                 mfcPressStart = UINT32_MAX;  // Prevent repeat
 
-                if (encoderButtonMode) {
-                    axisX = axisY = axisRX = axisRY = 0;
-                    axisSlider = axisDial = axisVx = axisVy = 0;
+                if (item == MFC_RESET) {
+                    // Hidden gesture: SHIFT+hold MFC parked on the printed
+                    // RESET item toggles BLE HID gamepad mode on/off.
+                    toggleBleMode();
+                } else {
+                    encoderButtonMode = !encoderButtonMode;
+
+                    if (encoderButtonMode) {
+                        axisX = axisY = axisRX = axisRY = 0;
+                        axisSlider = axisDial = axisVx = axisVy = 0;
+                    }
+                    saveConfig();
+                    uartSend("MODE", "ENC", encoderButtonMode ? "BTN" : "AXIS");
+                    if (MFC_DEBUG_LOG) {
+                        DBGF("[MFC MODE] ENC_MODE=%s (hold=%lums)", encoderButtonMode ? "BTN" : "AXIS", holdTime);
+                    }
+                    sendGamepad();
                 }
-                saveConfig();
-                uartSend("MODE", "ENC", encoderButtonMode ? "BTN" : "AXIS");
-                if (MFC_DEBUG_LOG) {
-                    DBGF("[MFC MODE] ENC_MODE=%s (hold=%lums)", encoderButtonMode ? "BTN" : "AXIS", holdTime);
-                }
-                sendGamepad();
             }
         }
     } else if (!mfcPressed && mfcPressStart > 0 && mfcPressStart != UINT32_MAX) {
-        // Released after short hold: check for preset
+        // Released after a hold that didn't already fire above
         unsigned long holdTime = millis() - mfcPressStart;
+        MfcMenuItem item = (MfcMenuItem)mfcIndex;
 
-        if (holdTime < MODE_HOLD_MS && holdTime > 50) {  // Valid short press
-            MfcMenuItem item = (MfcMenuItem)mfcIndex;
-
+        if (item == MFC_CALIB && holdTime >= MODE_HOLD_MS && holdTime < WIFI_PORTAL_HOLD_MS) {
+            // Hidden gesture: SHIFT+hold MFC parked on CALIB, released between
+            // 1.5s and WIFI_PORTAL_HOLD_MS, toggles the screen's WiFi
+            // telemetry link (applies on the screen's next reboot).
+            uartSend("WIFI", "TOGGLE", "");
+            DBGF("[MFC HOLD] CALIB -> WIFI TOGGLE (hold=%lums)", holdTime);
+        } else if (holdTime < MODE_HOLD_MS && holdTime > 50) {  // Valid short press
             if (MFC_DEBUG_LOG) {
                 DBGF("[MFC SW] SHORT hold=%lums item=%s", holdTime, mfcMenuNames[item]);
             }
@@ -2512,7 +2710,36 @@ void setup() {
     DBG("========================================");
     DBG(">>> ESP-ButtonBox-WHEEL FIRMWARE <<<");
     DBG(">>> main_wheel.cpp BOOTING <<<");
+    DBGF(">>> Reset reason: %s", wheelResetReasonStr());
     DBG("========================================");
+
+#if BLE_EARLY_INIT_TEST
+    // ---- DIAGNOSTIC ONLY (see docs/WIRELESS.md) ----
+    // Brings the BLE radio up here, before USB, I2C, PCA9685 LEDs and the
+    // NeoPixel strip, so the radio powers on with the board as unloaded as
+    // it ever gets. Purpose: tell apart "radio power-on alone collapses the
+    // 3V3 rail" from "it only collapses once everything else is drawing".
+    // Sticky guard: one crash disables the test permanently (NVS flag), so
+    // a failure can never leave the board in a reset loop.
+    {
+        prefs.begin("wheel", false);
+        if (prefs.getBool("bleBoot", false)) {
+            prefs.putBool("bleTestOff", true);
+            prefs.putBool("bleBoot", false);
+            DBG("[TEST] >>> RESULT: early BLE init CRASHED the board (radio alone is enough)");
+            DBG("[TEST] test now disabled permanently; board will run normally");
+        } else if (prefs.getBool("bleTestOff", false)) {
+            DBG("[TEST] early BLE init test already ran and failed - skipping");
+        } else {
+            DBG("[TEST] starting early BLE init with board unloaded...");
+            prefs.putBool("bleBoot", true);
+            bleGamepadInit();
+            prefs.putBool("bleBoot", false);
+            DBG("[TEST] >>> RESULT: early BLE init SURVIVED (radio alone is fine)");
+        }
+        prefs.end();
+    }
+#endif
 
     // Set USB device identity BEFORE any begin() calls
     // Custom VID/PID to avoid Windows caching old device names
@@ -2541,10 +2768,32 @@ void setup() {
     prefs.begin("wheel", false);
     loadConfig();
     DBG("[BOOT] Preferences loaded");
-    DBGF("[BOOT] clutchMode=%u bite=%u encBtn=%d swap=%d bright=%d page=%d",
+    DBGF("[BOOT] clutchMode=%u bite=%u encBtn=%d swap=%d bright=%d page=%d bleEn=%d",
          (unsigned)clutchCfg.mode, (unsigned)clutchCfg.bitePoint,
          encoderButtonMode ? 1 : 0, clutchChannelsSwapped ? 1 : 0,
-         brightnessValue, pageValue);
+         brightnessValue, pageValue, bleEnabled ? 1 : 0);
+
+    // BLE gamepad is opt-in (default OFF); USB HID above always initializes
+    // regardless — see the BLE section of this file for why.
+    if (bleEnabled) {
+        // Crash-loop guard. "bleBoot" is a breadcrumb set immediately before
+        // BLE bring-up and cleared right after it succeeds. Finding it still
+        // set here means the previous boot died inside bleGamepadInit(), so
+        // we disable BLE rather than reset-loop forever — a loop would leave
+        // the wheel unusable AND hard to reflash (USB keeps re-enumerating).
+        if (prefs.getBool("bleBoot", false)) {
+            bleEnabled = false;
+            prefs.putBool("bleEn", false);
+            prefs.putBool("bleBoot", false);
+            DBG("[BLE] !! Previous boot crashed during BLE init -> BLE force-disabled");
+            uartSend("BLE", "STATE", "CRASH_OFF");
+        } else {
+            DBG("[BLE] Starting BLE HID gamepad (enabled from saved config)...");
+            prefs.putBool("bleBoot", true);
+            bleGamepadInit();
+            prefs.putBool("bleBoot", false);
+        }
+    }
 
     // Configure ADC for Hall sensors (0-3.3V range)
     // analogSetPinAttenuation internally calls IDF adc1_config_channel_atten which

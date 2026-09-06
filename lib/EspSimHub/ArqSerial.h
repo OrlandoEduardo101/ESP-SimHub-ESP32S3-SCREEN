@@ -1,5 +1,12 @@
 #ifndef __ARQSERIAL_H__
 #define __ARQSERIAL_H__
+
+// Set to 1 to emit a compact per-packet timing line on Serial, separating
+// time spent waiting for the sender (idle_ms) from our own parse+ack cost
+// (proc_ms). Diagnostic only — leave at 0 for normal builds.
+#ifndef ARQ_TIMING_TRACE
+#define ARQ_TIMING_TRACE 0
+#endif
 //#define TESTFAIL
 
 #ifndef StreamRead
@@ -24,6 +31,10 @@ typedef void(*IdleFunction) (bool);
 class ARQSerial
 {
 private:
+
+#if ARQ_TIMING_TRACE
+	unsigned long arqTraceLastAckMicros = 0;
+#endif
 
 	// Buffer must hold the maximum ARQ payload (length <= 32). Use 64 for safety to avoid overflow.
 	byte partialdatabuffer[64];
@@ -61,6 +72,20 @@ private:
 	void ProcessIncomingData() {
 		int packetID, length, header, res, i, crc, nextpacketid;
 		byte currentCrc;
+
+#if ARQ_TIMING_TRACE
+		// Lightweight timing probe (one short line per packet, not per byte)
+		// to tell apart "the device is slow to acknowledge" from "the sender
+		// is slow to send the next chunk". t_idle = how long we sat with an
+		// empty stream since the last packet was acked (i.e. waiting on the
+		// PC); t_proc = our own parse+ack cost.
+		if (StreamAvailable() > 0 && arqTraceLastAckMicros != 0) {
+			unsigned long idleUs = micros() - arqTraceLastAckMicros;
+			Serial.print("[T] idle_ms=");
+			Serial.println(idleUs / 1000.0, 1);
+		}
+		unsigned long procStartUs = micros();
+#endif
 
 		while (StreamAvailable() > 0) {
 			if (DebugPort) {
@@ -169,6 +194,18 @@ private:
 #else
 				if (DebugPort) { DebugPort->print("[DBG] SendAcq id="); DebugPort->println(packetID); }
 				SendAcq(packetID);
+#if ARQ_TIMING_TRACE
+				{
+					unsigned long nowUs = micros();
+					Serial.print("[T] id=");
+					Serial.print(packetID);
+					Serial.print(" len=");
+					Serial.print(length);
+					Serial.print(" proc_ms=");
+					Serial.println((nowUs - procStartUs) / 1000.0, 1);
+					arqTraceLastAckMicros = nowUs;
+				}
+#endif
 #endif
 			}
 		}

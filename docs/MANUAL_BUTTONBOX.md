@@ -216,13 +216,20 @@ Os 4 sinais direcionais do 5-way joystick (slots 23–26) são convertidos em um
 |------|------|------|
 | SHIFT + MFC rotação | — | Navega rápido (pula 2 itens) |
 | SHIFT + MFC press | <0.5s | Preset rápido (varia conforme item) |
-| SHIFT + MFC press | 1.5s | Toggle ENC_MODE (AXIS ↔ BTN) |
+| SHIFT + MFC press, em qualquer item **exceto RESET/CALIB** | 1.5s | Toggle ENC_MODE (AXIS ↔ BTN) |
+| SHIFT + MFC press, parado em **RESET** | 1.5s | Liga/desliga **BLE do volante** (na hora, sem reboot) |
+| SHIFT + MFC press, parado em **CALIB** | solta entre 1.5s–4s | Liga/desliga **WiFi da tela** (aplica no próximo reboot da tela) |
+| SHIFT + MFC press, parado em **CALIB** | segurando 4s+ | Força o **portal de configuração WiFi** da tela (apaga credenciais salvas) |
 | SHIFT + Clutch A+B | Imediato | Swap embreagens (inverte Z/Rz) |
 | SHIFT + Clutch A+B | 2s | Ciclar modo embreagem (DUAL/MIRROR/BITE/PROGRESSIVE/SINGLE_L/SINGLE_R) |
 
+Os três combos de WiFi/BLE são **opcionais, desligados por padrão** e não têm
+item novo no adesivo do MFC — só reaproveitam RESET/CALIB com SHIFT+hold.
+Detalhes completos em [WIRELESS.md](WIRELESS.md).
+
 ### Atalhos e Controles Principais
 - **MFC (Encoder 1):** navega e ajusta o menu (não é usado como eixo/botão comum).
-- **SHIFT (Slot 28):** modificador interno com 4 combos avançados (ver tabela acima).
+- **SHIFT (Slot 28):** modificador interno com combos avançados (ver tabela acima).
 - **Encoders 2–9:** podem operar como **eixos** ou **botões**, conforme ENC_MODE.
 
 ### MFC (Encoder 1) - Menu Ajustável
@@ -256,9 +263,9 @@ O encoder MFC agora funciona em **dois modos**:
 	- **BITE**: largada F1 com remapeamento para bite point
 	- **PROGRESSIVE**: limitador inverso (rally/drift)
 	- **SINGLE_L/SINGLE_R**: apenas um paddle ativo
-2. **CALIB** — inicia/finaliza calibração Hall
+2. **CALIB** — inicia/finaliza calibração Hall *(SHIFT+hold aqui = WiFi da tela, ver combos acima)*
 3. **ENC MODE** — alterna AXIS ↔ BTN
-4. **RESET** — reseta tudo pro padrão
+4. **RESET** — reseta tudo pro padrão *(SHIFT+hold 1.5s aqui = BLE do volante, ver combos acima)*
 
 #### Itens com Modo Ajuste (gira MFC para ajustar)
 5. **BITE** — ajusta bite point (0-100, gira MFC)

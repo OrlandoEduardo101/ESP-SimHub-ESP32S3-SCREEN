@@ -40,6 +40,7 @@ This index helps you quickly find the right document by topic.
 - [WIFI_SIMHUB_CONFIG.md](WIFI_SIMHUB_CONFIG.md)
 - [INICIO_RAPIDO_WIFI.md](INICIO_RAPIDO_WIFI.md)
 - [TRUEPORT_SETUP.md](TRUEPORT_SETUP.md)
+- [WIRELESS.md](WIRELESS.md) — toggle opcional de WiFi (tela) / BLE (volante) via gesto escondido no MFC
 
 ## 6) Troubleshooting
 

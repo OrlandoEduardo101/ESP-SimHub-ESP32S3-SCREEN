@@ -15,13 +15,23 @@ class ECrowneWifi {
         static void flush() {
             instance.flush();
         }
+        // Deletes the stored WiFi credentials file so the next call to
+        // setup() opens the WiFiManager captive portal again. Used by the
+        // opt-in wireless toggle's "reset WiFi config" gesture.
+        static void forgetCredentials() {
+#if USE_HARDCODED_CREDENTIALS
+            // no-op: credentials are hardcoded at compile time, nothing to forget
+#else
+            if (FileFS.begin(true)) {
+                FileFS.remove(CONFIG_FILENAME);
+            }
+#endif
+        }
 };
 
-// these will override the Serial interface that SimHub uses to use our Streams
-#define FlowSerialBegin [](unsigned long baud) {}
-#define StreamRead incomingStream.read
-#define StreamAvailable incomingStream.available
-#define FlowSerialFlush ECrowneWifi::flush
-#define StreamFlush ECrowneWifi::flush
-#define StreamWrite outgoingStream.write
-#define StreamPrint outgoingStream.print
+// NOTE: the ARQ transport macros (FlowSerialBegin/StreamRead/StreamAvailable/
+// FlowSerialFlush/StreamFlush/StreamWrite/StreamPrint) that used to be
+// hard-redirected here at compile time are now defined in src/main.cpp as
+// small runtime-dispatching wrapper functions, so a single firmware build
+// can choose USB Serial (default) or this WiFi bridge based on a persisted
+// setting instead of a compile-time flag. Do not redefine them here again.

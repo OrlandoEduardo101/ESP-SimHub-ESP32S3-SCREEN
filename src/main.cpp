@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <EspSimHub.h>
 #include <Arduino_GFX_Library.h>
+#include <Preferences.h>
 #include "esp_system.h"
 
 #define DEVICE_NAME "ESP-SimHubDisplay"
@@ -9,7 +10,6 @@
 #define SCREEN_WIDTH_MM 95 // only the screen area with pixels, in mm. Can be approximate, used to calculate density
 #define PIXEL_PER_MM (PIXEL_WIDTH / SCREEN_WIDTH_MM)
 
-#define INCLUDE_WIFI false
 // Less secure if you plan to commit or share your files, but saves a bunch of memory.
 //  If you hardcode credentials the device will only work in your network
 #define USE_HARDCODED_CREDENTIALS false
@@ -18,7 +18,6 @@
 // Configure LED strip in src/NeoPixelBusLEDs.h
 #define INCLUDE_RGB_LEDS_NEOPIXELBUS
 
-#if INCLUDE_WIFI
 #if USE_HARDCODED_CREDENTIALS
 #define WIFI_SSID "Wifi NAME"
 #define WIFI_PASSWORD "WiFi Password"
@@ -27,15 +26,63 @@
 #define BRIDGE_PORT 10001 // Perle TruePort uses port 10,001 for the first serial routed to the client
 #define DEBUG_TCP_BRIDGE false // emits extra events to Serial that show network communication, set to false to save memory and make faster
 
+// OTA firmware updates over the same opt-in WiFi link (only active while
+// wifiTransportActive is true — see setup()). CHANGE THIS before relying on
+// it: anyone on the WiFi network with this password can reflash the board.
+// Must match platformio.ini's [env:wt32-sc01-plus-ota] upload_flags --auth=.
+#define OTA_PASSWORD "changeme-simhub-wt32"
+#include <ArduinoOTA.h>
+
+// ==========================================
+// Optional WiFi telemetry link (opt-in, default OFF)
+// WiFi library code is always compiled in (flash cost only), but the radio
+// and TCP bridge are only started when wifiTransportActive is true — loaded
+// from NVS, default false. This keeps USB CDC as the default SimHub
+// transport with zero behavior change unless the user explicitly enables
+// WiFi (via the wheel's hidden gesture, see processButtonBoxLine()) and
+// reboots. See docs/WIRELESS.md for the full design rationale.
+// ==========================================
 #include <TcpSerialBridge2.h>
-#include <ECrowneWifi.h>
 #include <FullLoopbackStream.h>
-FullLoopbackStream outgoingStream;
-FullLoopbackStream incomingStream;
+// FullLoopbackStream defaults to a 64-byte ring buffer (LoopbackStream's
+// DEFAULT_SIZE). A single custom-protocol telemetry frame from SimHub is
+// ~270 bytes and arrives over TCP in one burst — unlike real serial, which
+// paces bytes out at the configured baud rate, TCP hands the whole payload
+// to handleData() at once. Past the first 64 bytes, every write silently
+// failed and FullLoopbackStream::write() dropped the rest of the frame
+// (LoopbackStream.h: "If the buffer overflows, the last bytes written are
+// lost"), truncating the ARQ framing mid-message. That, not WiFi latency,
+// was the real cause of the ~3 FPS ceiling and the high corrupted/retransmit
+// counts in SimHub — WiFi.setSleep(false) alone did not fix it. Sized well
+// above the largest known frame for headroom as the protocol grows; cost is
+// ~1KB extra RAM per buffer, trivial against the ~280KB free.
+FullLoopbackStream outgoingStream(1024);
+FullLoopbackStream incomingStream(1024);
+bool wifiTransportActive = false; // set from NVS in setup(), before ArqSerial is touched
+Preferences wifiPrefs;
 
-#endif // INCLUDE_WIFI
+#include <ECrowneWifi.h>
 
-// FlowSerial uses default Serial (USB CDC)
+// Runtime dispatch for the ARQ transport: USB Serial (default) or the WiFi
+// loopback streams (opt-in). Must be defined before FlowSerialRead.h pulls
+// in ArqSerial.h, since these override its Serial-default macros.
+int wsStreamRead() { return wifiTransportActive ? incomingStream.read() : Serial.read(); }
+int wsStreamAvailable() { return wifiTransportActive ? incomingStream.available() : Serial.available(); }
+size_t wsStreamWrite(uint8_t b) { return wifiTransportActive ? outgoingStream.write(b) : Serial.write(b); }
+size_t wsStreamWrite(const char* str) { return wifiTransportActive ? outgoingStream.write(str) : Serial.write(str); }
+void wsStreamFlush() { if (wifiTransportActive) ECrowneWifi::flush(); else Serial.flush(); }
+size_t wsStreamPrint(const String &s) { return wifiTransportActive ? outgoingStream.print(s) : Serial.print(s); }
+size_t wsStreamPrint(const char* str) { return wifiTransportActive ? outgoingStream.print(str) : Serial.print(str); }
+size_t wsStreamPrint(char c) { return wifiTransportActive ? outgoingStream.print(c) : Serial.print(c); }
+void wsFlowSerialBegin(unsigned long baud) { if (!wifiTransportActive) Serial.begin(baud); }
+
+#define StreamRead wsStreamRead
+#define StreamAvailable wsStreamAvailable
+#define StreamWrite wsStreamWrite
+#define StreamFlush wsStreamFlush
+#define StreamPrint wsStreamPrint
+#define FlowSerialBegin wsFlowSerialBegin
+#define FlowSerialFlush wsStreamFlush
 
 #include <FlowSerialRead.h>
 
@@ -54,7 +101,10 @@ unsigned long lastSerialActivity = 0;
 
 RTC_DATA_ATTR uint32_t bootCount = 0;
 
-// Dummy debug port (no actual output)
+// Dummy debug port (no actual output). The per-byte tracer behind this is
+// far too slow to leave on while measuring timing — see ARQ_TIMING_TRACE in
+// lib/EspSimHub/ArqSerial.h for the lightweight per-packet timing probe used
+// to diagnose the WiFi throughput problem instead.
 Stream* DebugPort = nullptr;
 
 // ==========================================
@@ -186,6 +236,50 @@ void setup(void)
 	screenLog("Display init OK");
 	debugLog("Display init OK");
 
+	// ==========================================
+	// Optional WiFi telemetry link (opt-in, default OFF, applied at boot only)
+	// See the comment above the includes near the top of this file.
+	// ==========================================
+	wifiPrefs.begin("screen", false);
+	wifiTransportActive = wifiPrefs.getBool("wifiEn", false);
+	if (wifiTransportActive) {
+		screenLog("WiFi mode: connecting...");
+		debugLog(">>> WiFi enabled - starting ECrowneWifi::setup() (may block up to ~120s on first-time provisioning)");
+		ECrowneWifi::setup(&outgoingStream, &incomingStream, gfx);
+		// The ARQ protocol (lib/EspSimHub/ArqSerial.h) is a stop-and-wait
+		// scheme tuned for USB's sub-ms round trips. WiFi modem sleep (the
+		// default) makes the radio nap between packets, pushing RTT to
+		// 40-120ms — the ARQ layer times out and retransmits before the ack
+		// even arrives, tanking throughput (observed: ~2.8 FPS in SimHub,
+		// ~2/3 of packets retransmitted). Disabling sleep trades a bit more
+		// idle power draw for USB-like responsiveness.
+		WiFi.setSleep(false);
+
+		ArduinoOTA.setHostname("esp-simhub-display");
+		ArduinoOTA.setPassword(OTA_PASSWORD);
+		ArduinoOTA.onStart([]() {
+			screenLog("OTA: update starting...");
+		});
+		ArduinoOTA.onEnd([]() {
+			screenLog("OTA: update done, rebooting");
+		});
+		ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+			static uint8_t lastPct = 255;
+			uint8_t pct = (total > 0) ? (uint8_t)((progress * 100) / total) : 0;
+			if (pct != lastPct) {
+				lastPct = pct;
+				screenLog("OTA: " + String(pct) + "%");
+			}
+		});
+		ArduinoOTA.onError([](ota_error_t error) {
+			screenLog("OTA: error " + String((int)error));
+		});
+		ArduinoOTA.begin();
+		debugLog(">>> ArduinoOTA ready (hostname=esp-simhub-display)");
+
+		screenLog("WiFi mode: ready");
+	}
+
 	// Initialize NeoPixel LED strip
 	#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
 	Serial.println(">>> [STEP 1] About to init NeoPixel LEDs...");
@@ -226,9 +320,10 @@ void loop()
     waitingLogged = true;
   }
 
-#if INCLUDE_WIFI
-  ECrowneWifi::loop();
-#endif
+  if (wifiTransportActive) {
+    ECrowneWifi::loop();
+    ArduinoOTA.handle();
+  }
 
   // Re-enabled: display updates
   shCustomProtocol.loop();
@@ -391,6 +486,16 @@ void processButtonBoxLine(const String &line) {
 		msg = String("BOOT: ") + val;
 	} else if (cat == "SYS" && func == "RESET") {
 		msg = String("RESET: ") + val;
+	} else if (cat == "WIFI" && func == "TOGGLE") {
+		bool newState = !wifiPrefs.getBool("wifiEn", false);
+		wifiPrefs.putBool("wifiEn", newState);
+		msg = newState ? "WIFI: ON (reboot)" : "WIFI: OFF (reboot)";
+	} else if (cat == "WIFI" && func == "PORTAL") {
+		wifiPrefs.putBool("wifiEn", true);
+		ECrowneWifi::forgetCredentials();
+		msg = "WIFI: RESET CFG (reboot)";
+	} else if (cat == "BLE" && func == "STATE") {
+		msg = String("BLE: ") + val;
 	} else if (cat == "MEDIA") {
 		msg = String("MEDIA: ") + func;
 	} else {
