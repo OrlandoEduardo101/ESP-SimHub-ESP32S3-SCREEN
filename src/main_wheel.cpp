@@ -1265,7 +1265,6 @@ bool calibratingHall = false;
 bool adjustingBite = false;
 
 // Hall/clutch anti-noise (helps when halls are not connected yet)
-static const uint8_t HALL_MEDIAN_SAMPLES  = 7;    // odd — median rejects spikes of any magnitude
 static const uint8_t HALL_REST_MARGIN     = 8;    // % of range to clamp to -127 at the REST end.
                                                     // Larger than press margin: sensor sits at mechanical
                                                     // rest during cal, so noise easily pushes it above min.
@@ -1278,27 +1277,75 @@ static const bool    HALL_RAW_DEBUG       = true;
 static const unsigned long HALL_RAW_DEBUG_MS = 100;
 unsigned long lastHallRawDebugMs = 0;
 
-// Kalman 1D filter state (one per hall channel)
-// Process noise Q: how much we trust the sensor moving; Measurement noise R: ADC noise estimate.
-// For a Hall on ESP32 ADC (12-bit, ~±15 count noise): R≈225, Q≈1 gives crisp yet smooth tracking.
+// --- Hall sampling pipeline -------------------------------------------------
+// The 12 front-button LEDs hang off the same 3.3V rail as the (ratiometric)
+// hall sensors and are PWM'd by the PCA9685 at LED_PWM_FREQ. The rail — and
+// with it the hall output — carries that ripple. The previous sampler burst 7
+// reads in ~0.5ms, i.e. less than one PWM period, so every call landed on an
+// arbitrary PWM phase and returned either the "LEDs lit" or the "LEDs dark"
+// level. That bimodal reading is what looked like phantom press/release pulses;
+// no amount of downstream smoothing removes it, because it is a coherent
+// disturbance, not white noise.
+//
+// Stage 1 (hallReadIntegrated): average uniformly spaced samples across exactly
+//   one PWM period. Integrating a periodic disturbance over a whole period
+//   cancels it regardless of duty cycle.
+// Stage 2 (hallPushMedian): bursts longer than one period — I2C traffic, BLE TX,
+//   LED state changes — survive stage 1. Spread over a multi-tick window they
+//   corrupt only a minority of entries, so a median drops them outright.
+// Stage 3 (Kalman1D): outlier gate plus adaptive process noise.
+static const uint16_t HALL_PWM_PERIOD_US  = 1000000UL / LED_PWM_FREQ;  // 1000us
+static const uint8_t  HALL_INTEG_SAMPLES  = 8;    // per channel, per PWM period
+static const uint8_t  HALL_MEDIAN_DEPTH   = 5;    // odd — rolling median over time
+static const uint8_t  HALL_TICK_MS        = 4;    // fixed 250Hz sampling tick
+static const uint8_t  HALL_MIN_TRAVEL_TICKS = 8;  // fastest humanly possible full sweep
+uint8_t  hallIntegSamples = HALL_INTEG_SAMPLES;   // lowered at boot if the ADC is too slow
+uint16_t hallRingA[HALL_MEDIAN_DEPTH];
+uint16_t hallRingB[HALL_MEDIAN_DEPTH];
+uint8_t  hallRingPos   = 0;
+uint8_t  hallRingCount = 0;
+unsigned long lastHallTickMs = 0;
+uint32_t hallIntegWindowUs = 0;   // measured stage-1 window, checked at boot
+
+// Kalman 1D filter state (one per hall channel).
+// R is the measurement noise (ADC + sensor, ~15 count stdev → 225).
+// Q is adaptive: small while the paddle is still, so residual jitter is smoothed
+// hard, and large while it moves, so the gain rises and a real press has no lag.
+// A fixed Q forces a choice between those two; adapting it does not.
+static const float HALL_Q_MIN  = 6.0f;    // still  → Kalman gain ~0.15
+static const float HALL_Q_MAX  = 200.0f;  // moving → Kalman gain ~0.60
+static const float HALL_Q_GAIN = 0.2f;    // Q = MIN + GAIN * innovation^2
+static const uint8_t HALL_OUTLIER_MAX_REJECTS = 3;  // never stall a real move longer than this
 struct Kalman1D {
     float x;      // state estimate (filtered value)
     float p;      // estimate error covariance
-    float q;      // process noise covariance
     float r;      // measurement noise covariance
     bool  init;
-    Kalman1D() : x(0), p(1), q(1.0f), r(225.0f), init(false) {}
-    float update(float measurement) {
-        if (!init) { x = measurement; init = true; return x; }
+    uint8_t rejects;   // consecutive samples dropped by the outlier gate
+    Kalman1D() : x(0), p(1), r(225.0f), init(false), rejects(0) {}
+    // maxStep: the largest jump a hand can produce in one tick, in ADC counts.
+    // Anything past it is a glitch — unless it repeats, in which case the sensor
+    // really did move (or was re-seated) and we re-lock onto the new level.
+    float update(float measurement, float maxStep) {
+        if (!init) { x = measurement; init = true; rejects = 0; return x; }
+        float innov = measurement - x;
+        float mag   = fabsf(innov);
+        if (mag > maxStep && rejects < HALL_OUTLIER_MAX_REJECTS) {
+            rejects++;
+            return x;
+        }
+        rejects = 0;
+        float q = HALL_Q_MIN + HALL_Q_GAIN * mag * mag;
+        if (q > HALL_Q_MAX) q = HALL_Q_MAX;
         // Predict
         p = p + q;
         // Update
         float k = p / (p + r);   // Kalman gain
-        x = x + k * (measurement - x);
+        x = x + k * innov;
         p = (1.0f - k) * p;
         return x;
     }
-    void reset(float measurement) { x = measurement; p = 1; init = true; }
+    void reset(float measurement) { x = measurement; p = 1; init = true; rejects = 0; }
 };
 
 Kalman1D kalmanA;
@@ -2204,16 +2251,58 @@ static void sortU16(uint16_t* arr, uint8_t n) {
     }
 }
 
-// Median of HALL_MEDIAN_SAMPLES readings — immune to spikes of any magnitude.
-// Settling delay between consecutive reads prevents ADC channel crosstalk.
-static uint16_t hallReadMedian(uint8_t pin) {
-    uint16_t buf[HALL_MEDIAN_SAMPLES];
-    for (uint8_t i = 0; i < HALL_MEDIAN_SAMPLES; i++) {
-        buf[i] = analogRead(pin);
-        delayMicroseconds(20);
+// Stage 1: average hallIntegSamples readings per channel, uniformly spaced
+// across exactly one LED PWM period, which cancels the rail ripple whatever the
+// LED duty cycle happens to be. Both channels are read inside the same window
+// so a rail disturbance lands on them identically, and so the whole tick costs
+// one period rather than two. The deadline spin keeps the spacing uniform even
+// though analogRead() jitters — uneven spacing is exactly what breaks the
+// cancellation. Both pins are read every tick regardless of presence; the caller
+// substitutes a midpoint for a channel that is not connected.
+static void hallReadIntegrated(uint16_t& outA, uint16_t& outB) {
+    const uint32_t slotUs = HALL_PWM_PERIOD_US / hallIntegSamples;
+    uint32_t accA = 0, accB = 0;
+    uint32_t t0 = micros();
+    for (uint8_t i = 0; i < hallIntegSamples; i++) {
+        accA += analogRead(HALL_A_PIN);
+        delayMicroseconds(10);   // settle — prevents ADC channel crosstalk
+        accB += analogRead(HALL_B_PIN);
+        uint32_t due = t0 + (uint32_t)(i + 1) * slotUs;
+        while ((int32_t)(micros() - due) < 0) { /* hold the slot boundary */ }
     }
-    sortU16(buf, HALL_MEDIAN_SAMPLES);
-    return buf[HALL_MEDIAN_SAMPLES / 2];
+    hallIntegWindowUs = micros() - t0;
+    outA = (uint16_t)(accA / hallIntegSamples);
+    outB = (uint16_t)(accB / hallIntegSamples);
+}
+
+// Stage 2: push one integrated sample per channel into the rolling ring and
+// return the median of the window. Unlike the previous in-burst median, this one
+// spans HALL_MEDIAN_DEPTH ticks of wall time, so it rejects disturbances that
+// last far longer than a single ADC burst.
+static void hallPushMedian(uint16_t inA, uint16_t inB, uint16_t& outA, uint16_t& outB) {
+    hallRingA[hallRingPos] = inA;
+    hallRingB[hallRingPos] = inB;
+    hallRingPos = (uint8_t)((hallRingPos + 1) % HALL_MEDIAN_DEPTH);
+    if (hallRingCount < HALL_MEDIAN_DEPTH) hallRingCount++;
+    uint16_t tmpA[HALL_MEDIAN_DEPTH];
+    uint16_t tmpB[HALL_MEDIAN_DEPTH];
+    memcpy(tmpA, hallRingA, hallRingCount * sizeof(uint16_t));
+    memcpy(tmpB, hallRingB, hallRingCount * sizeof(uint16_t));
+    sortU16(tmpA, hallRingCount);
+    sortU16(tmpB, hallRingCount);
+    outA = tmpA[hallRingCount / 2];
+    outB = tmpB[hallRingCount / 2];
+}
+
+// Drop all filter history — used after calibration so pre-calibration samples
+// cannot leak into the first reads taken under the new bounds.
+static void hallResetFilters() {
+    hallRingPos = 0;
+    hallRingCount = 0;
+    kalmanA.init = false;
+    kalmanB.init = false;
+    kalmanA.rejects = 0;
+    kalmanB.rejects = 0;
 }
 
 // Apply directional hysteresis: only accept a new axis value if it moves
@@ -2280,34 +2369,55 @@ void updateClutches() {
     // Skip entirely if no hall sensors connected — axes stay at 0
     if (!hallAConnected && !hallBConnected) return;
 
-    // Step 1: Median filter — reads HALL_MEDIAN_SAMPLES times, returns middle value.
-    // Immune to ADC spikes of any magnitude (cosmic rays, EMI).
-    uint16_t rawA = hallAConnected ? hallReadMedian(HALL_A_PIN) : (uint16_t)((clutchCfg.hallMinA + clutchCfg.hallMaxA) / 2);
-    delayMicroseconds(50);
-    uint16_t rawB = hallBConnected ? hallReadMedian(HALL_B_PIN) : (uint16_t)((clutchCfg.hallMinB + clutchCfg.hallMaxB) / 2);
+    // Fixed 250Hz tick. The old code sampled once per loop() iteration, so the
+    // filter time constants — which are counted in samples, not milliseconds —
+    // drifted with loop load: an I2C matrix scan or an LED write stretches an
+    // iteration by whole milliseconds. A fixed tick makes the filter behaviour
+    // deterministic, and costs less CPU than the previous every-iteration burst.
+    unsigned long nowMs = millis();
+    if (nowMs - lastHallTickMs < HALL_TICK_MS) return;
+    lastHallTickMs = nowMs;
 
-    // Step 2: Kalman 1D filter — tracks real movement while rejecting Gaussian ADC noise.
-    // More effective than IIR: adapts gain based on uncertainty rather than a fixed fraction.
-    float kfA = kalmanA.update((float)rawA);
-    float kfB = kalmanB.update((float)rawB);
+    // Step 1: integrate over one LED PWM period — cancels the 3.3V rail ripple.
+    uint16_t intA, intB;
+    hallReadIntegrated(intA, intB);
+    if (!hallAConnected) intA = (uint16_t)((clutchCfg.hallMinA + clutchCfg.hallMaxA) / 2);
+    if (!hallBConnected) intB = (uint16_t)((clutchCfg.hallMinB + clutchCfg.hallMaxB) / 2);
+
+    // Step 2: rolling median across ticks — rejects multi-millisecond bursts.
+    uint16_t rawA, rawB;
+    hallPushMedian(intA, intB, rawA, rawB);
+
+    // Step 3: Kalman 1D with an outlier gate and adaptive process noise.
+    // maxStep comes from the calibrated span: a hand cannot sweep a paddle
+    // through its full travel in fewer than HALL_MIN_TRAVEL_TICKS ticks, so a
+    // larger jump than that is a glitch by definition. A span of zero means we
+    // are mid-calibration (min/max are still seeded inverted), so the gate is
+    // opened wide rather than blocking the extremes we are trying to capture.
+    int32_t spanCalA = (int32_t)clutchCfg.hallMaxA - (int32_t)clutchCfg.hallMinA;
+    int32_t spanCalB = (int32_t)clutchCfg.hallMaxB - (int32_t)clutchCfg.hallMinB;
+    float maxStepA = (spanCalA > 0) ? (float)spanCalA / HALL_MIN_TRAVEL_TICKS : 4096.0f;
+    float maxStepB = (spanCalB > 0) ? (float)spanCalB / HALL_MIN_TRAVEL_TICKS : 4096.0f;
+    float kfA = kalmanA.update((float)rawA, maxStepA);
+    float kfB = kalmanB.update((float)rawB, maxStepB);
 
     uint16_t filtA = (uint16_t)constrain((int32_t)kfA, 0, 4095);
     uint16_t filtB = (uint16_t)constrain((int32_t)kfB, 0, 4095);
 
     if (HALL_RAW_DEBUG) {
-        unsigned long nowMs = millis();
         if (nowMs - lastHallRawDebugMs >= HALL_RAW_DEBUG_MS) {
             lastHallRawDebugMs = nowMs;
             int8_t dbgA = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
             int8_t dbgB = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
-            DBGF("[HALL] raw A=%u B=%u | kalman A=%.1f B=%.1f | axis A=%d B=%d | cal A[%u-%u] B[%u-%u]",
-                rawA, rawB, kfA, kfB, dbgA, dbgB,
-                clutchCfg.hallMinA, clutchCfg.hallMaxA,
-                clutchCfg.hallMinB, clutchCfg.hallMaxB);
+            DBGF("[HALL] i A=%u B=%u | m A=%u B=%u | k A=%.0f B=%.0f | ax A=%d B=%d | rj %u/%u | w=%lu",
+                intA, intB, rawA, rawB, kfA, kfB, dbgA, dbgB,
+                kalmanA.rejects, kalmanB.rejects, (unsigned long)hallIntegWindowUs);
         }
     }
 
-    // During calibration: track raw min/max extremes (no filtering — we want real limits)
+    // During calibration: track extremes from the median stage, before the
+    // Kalman. Taking them pre-Kalman keeps the endpoints honest; taking them
+    // post-median keeps a single glitch from setting a bogus limit for good.
     if (calibratingHall) {
         if (rawA < clutchCfg.hallMinA) clutchCfg.hallMinA = rawA;
         if (rawA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = rawA;
@@ -2315,7 +2425,7 @@ void updateClutches() {
         if (rawB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = rawB;
     }
 
-    // Step 3: Map to -127..127 with endpoint clamp (mapHallToAxis handles it)
+    // Step 4: Map to -127..127 with endpoint clamp (mapHallToAxis handles it)
     int8_t a = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
     int8_t b = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
 
@@ -2390,7 +2500,7 @@ void updateClutches() {
         finalB = 0;
     }
 
-    // Step 4: Directional hysteresis — only update HID report when the axis
+    // Step 5: Directional hysteresis — only update HID report when the axis
     // moves at least CLUTCH_HYSTERESIS counts in a sustained direction.
     // Eliminates 1-2 count chatter at a stable resting position.
     bool changedA = applyHysteresis(finalA, hallLastReportedA);
@@ -2610,9 +2720,9 @@ void handleMfcPress() {
                         clutchCfg.hallMaxA = (clutchCfg.hallMaxA > shrinkA) ? clutchCfg.hallMaxA - shrinkA : clutchCfg.hallMaxA;
                         clutchCfg.hallMinB = (clutchCfg.hallMinB + shrinkB < clutchCfg.hallMaxB) ? clutchCfg.hallMinB + shrinkB : clutchCfg.hallMinB;
                         clutchCfg.hallMaxB = (clutchCfg.hallMaxB > shrinkB) ? clutchCfg.hallMaxB - shrinkB : clutchCfg.hallMaxB;
-                        // Reset Kalman filters so stale estimates don't persist after new cal bounds
-                        kalmanA.init = false;
-                        kalmanB.init = false;
+                        // Drop every filter stage so pre-calibration samples
+                        // can't leak into the first reads under the new bounds
+                        hallResetFilters();
                         hallLastReportedA = 0;
                         hallLastReportedB = 0;
                         saveConfig();
@@ -2805,6 +2915,22 @@ void setup() {
     gpio_set_pull_mode(GPIO_NUM_1, GPIO_FLOATING);  // disable pull-up re-enabled by IDF ADC init
     gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);  // same for Hall B
     DBG("[ADC] Hall sensor pins configured (GPIO1=HallA, GPIO2=HallB, 12-bit, 11dB, pull-up disabled)");
+
+    // Stage-1 timing self-check. The integration window has to land on one whole
+    // LED PWM period or the rail-ripple cancellation leaks through. If
+    // analogRead() is too slow to fit hallIntegSamples slots inside the period,
+    // halve the sample count until it does.
+    {
+        uint16_t probeA, probeB;
+        for (uint8_t attempt = 0; attempt < 3; attempt++) {
+            hallReadIntegrated(probeA, probeB);
+            if (hallIntegWindowUs <= HALL_PWM_PERIOD_US + HALL_PWM_PERIOD_US / 20) break;
+            if (hallIntegSamples <= 2) break;
+            hallIntegSamples /= 2;
+        }
+        DBGF("[ADC] Hall integration: %u samples over %luus (target %uus)",
+            hallIntegSamples, (unsigned long)hallIntegWindowUs, (unsigned)HALL_PWM_PERIOD_US);
+    }
 
     // Detect hall sensor presence (variance test)
     hallAConnected = detectHallPresence(HALL_A_PIN, "HallA(GPIO1)");
