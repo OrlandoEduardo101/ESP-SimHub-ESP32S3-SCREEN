@@ -199,8 +199,9 @@ static const int UART_TX_PIN = 43;
 // gesture (see toggleBleMode()) and only sends reports when active, so the
 // two never fight over the same input even though the USB HID interface
 // itself can't be unplugged from the wire at runtime (TinyUSB descriptors
-// are fixed at boot). Reuses customGamepadDescriptor verbatim as the BLE
-// HID Report Map — the byte layout is transport-agnostic.
+// are fixed at boot). The BLE HID Report Map reuses customGamepadDescriptor
+// unchanged — the byte layout is transport-agnostic — with the consumer
+// control collection appended so media keys survive the switch to wireless.
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 
@@ -211,6 +212,46 @@ bool bleConnected = false;
 NimBLEServer* bleServer = nullptr;
 NimBLEHIDDevice* bleHid = nullptr;
 NimBLECharacteristic* bleInputGamepad = nullptr;
+NimBLECharacteristic* bleInputConsumer = nullptr;
+
+// Consumer Control (media keys) collection, appended to customGamepadDescriptor
+// to form the BLE report map. Deliberately NOT added to the USB descriptor: on
+// USB these keys already work through the framework's USBHIDConsumerControl,
+// which registers this same collection as its own HID interface, and declaring
+// it twice would hand the host two competing consumer-control reports.
+//
+// One 16-bit array field carrying a Consumer usage code, 0 meaning nothing
+// pressed — byte-for-byte what USBHIDConsumerControl::send() puts on the wire,
+// so both transports take the same value from hidConsumerSend().
+static const uint8_t consumerControlDescriptor[] = {
+    0x05, 0x0C,       // Usage Page (Consumer)
+    0x09, 0x01,       // Usage (Consumer Control)
+    0xA1, 0x01,       // Collection (Application)
+    0x85, HID_REPORT_ID_CONSUMER_CONTROL, // Report ID (4 from framework enum)
+    0x15, 0x00,       // Logical Minimum (0)
+    0x26, 0xFF, 0x03, // Logical Maximum (1023)
+    0x19, 0x00,       // Usage Minimum (0)
+    0x2A, 0xFF, 0x03, // Usage Maximum (1023)
+    0x75, 0x10,       // Report Size (16)
+    0x95, 0x01,       // Report Count (1)
+    0x81, 0x00,       // Input (Data,Array,Abs)
+    0xC0              // End Collection
+};
+
+// Send one Consumer Control value over whichever HID transport is active,
+// mirroring how sendGamepad() branches: USB stays the default, BLE takes over
+// only while it is enabled and actually connected. A value of 0 is the release.
+bool hidConsumerSend(uint16_t value) {
+    if (bleEnabled) {
+        if (!bleActive || !bleConnected || !bleInputConsumer) return false;
+        uint8_t rpt[2] = { (uint8_t)(value & 0xFF), (uint8_t)(value >> 8) };
+        bleInputConsumer->setValue(rpt, sizeof(rpt));
+        bleInputConsumer->notify();
+        return true;
+    }
+    return (value != 0) ? (ConsumerControl.press(value) > 0)
+                        : (ConsumerControl.release() > 0);
+}
 
 class BleGamepadServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) override {
@@ -268,14 +309,25 @@ void bleGamepadInit() {
     bleHid->manufacturer(std::string("SimRacing_DIY"));
     bleHid->pnp(0x02, 0x303A, 0x8172, 1);
     bleHid->hidInfo(0x00, 0x01);
-    bleHid->reportMap((uint8_t*)customGamepadDescriptor, sizeof(customGamepadDescriptor));
-    DBGF("[BLE] step 4: HID device built, reportMap=%u bytes",
-         (unsigned)sizeof(customGamepadDescriptor));
+    // Concatenated at runtime rather than written out as one literal, so the
+    // gamepad half can never drift from the descriptor USB is using.
+    static uint8_t bleReportMap[sizeof(customGamepadDescriptor) + sizeof(consumerControlDescriptor)];
+    memcpy(bleReportMap, customGamepadDescriptor, sizeof(customGamepadDescriptor));
+    memcpy(bleReportMap + sizeof(customGamepadDescriptor),
+           consumerControlDescriptor, sizeof(consumerControlDescriptor));
+    bleHid->reportMap(bleReportMap, sizeof(bleReportMap));
+    DBGF("[BLE] step 4: HID device built, reportMap=%u bytes (gamepad %u + consumer %u)",
+         (unsigned)sizeof(bleReportMap),
+         (unsigned)sizeof(customGamepadDescriptor),
+         (unsigned)sizeof(consumerControlDescriptor));
 
-    bleInputGamepad = bleHid->inputReport(HID_REPORT_ID_GAMEPAD);
-    DBGF("[BLE] step 5: input report id=%u %s",
+    bleInputGamepad  = bleHid->inputReport(HID_REPORT_ID_GAMEPAD);
+    bleInputConsumer = bleHid->inputReport(HID_REPORT_ID_CONSUMER_CONTROL);
+    DBGF("[BLE] step 5: input reports gamepad(id=%u)=%s consumer(id=%u)=%s",
          (unsigned)HID_REPORT_ID_GAMEPAD,
-         bleInputGamepad ? "OK" : "NULL!");
+         bleInputGamepad ? "OK" : "NULL!",
+         (unsigned)HID_REPORT_ID_CONSUMER_CONTROL,
+         bleInputConsumer ? "OK" : "NULL!");
 
     bleHid->startServices();
     DBG("[BLE] step 6: services started");
@@ -301,6 +353,7 @@ void bleGamepadDeinit() {
     bleServer = nullptr;
     bleHid = nullptr;
     bleInputGamepad = nullptr;
+    bleInputConsumer = nullptr;
     bleActive = false;
     bleConnected = false;
 }
@@ -1488,9 +1541,9 @@ static const uint16_t SHIFT_ENC_LATERAL_CC[8] = {
 
 // Send a momentary Consumer Control pulse (press + delay + release)
 void sendShiftCC(uint16_t usageId) {
-    ConsumerControl.press(usageId);
+    hidConsumerSend(usageId);
     delay(30);
-    ConsumerControl.release();
+    hidConsumerSend(0);
 }
 
 // Track SHIFT+button state to handle release properly
@@ -1705,9 +1758,9 @@ void uartRoundtripTask() {
 }
 
 void sendConsumerControl(uint16_t code) {
-    ConsumerControl.press(code);
+    hidConsumerSend(code);
     delay(10);
-    ConsumerControl.release();
+    hidConsumerSend(0);
 }
 
 void saveConfig() {
