@@ -57,73 +57,88 @@ desacoplamento já estão instalados** — não sugerir isso de novo.
   Confirma que entrou em bootloader vendo PID `1001` no `pio device list`
   (em vez do normal `8172`).
 
-## Problema não resolvido #2: dashboard da tela via WiFi é lento
+## RESOLVIDO: dashboard lento por WiFi (e o MFC junto)
 
-**Sintoma**: valores (velocidade etc.) demoram ~3s pra atualizar na tela,
-mesmo depois de corrigir dois bugs reais no firmware.
+**Era uma causa raiz só, com dois sintomas.** O protocolo ARQ é stop-and-wait:
+um ack por pacote, um de cada vez. Um frame de ~270 bytes vira ~17 idas-e-voltas
+sequenciais, e cada uma custa ~92ms porque o lado Windows demora a mandar o
+pacote seguinte. 17 × 92ms ≈ 1,6s por frame. E enquanto a placa esperava dentro
+de `ARQSerial::read()` (medido: 2,69s numa única iteração do `loop()`), o
+`handleButtonBoxUart()` não rodava — daí o menu MFC parecer travado.
 
-**Bugs reais já corrigidos** (e que valeram a pena, mas não foram a causa
-completa):
-1. Buffer de rede de 64 bytes (`FullLoopbackStream` default) estourando
-   com frames de ~270 bytes → corrigido pra 1024 bytes.
-2. Corrida de threads: `AsyncTCP` escreve no buffer numa FreeRTOS task
-   separada do `loop()` principal, sem lock nenhum no `LoopbackStream`
-   original → adicionado `portMUX`/critical section em
-   `lib/FullLoopbackStream/`.
-3. `WiFi.setSleep(false)` — o power-save do WiFi deixava o RTT em
-   40-120ms; sem ele caiu pra ~5-18ms. Ajudou, mas sozinho não resolveu.
+**Correção**: transporte cru na porta 10002, sem ARQ. Ver `docs/WIRELESS.md`,
+seção "Transporte cru", para a arquitetura, a configuração do SimHub e os
+números. Resumo: **0,6 → 30 fps**, pior `loop()` de 2.689.780µs → 13.000µs.
 
-**Causa raiz ainda não resolvida**, isolada via instrumentação:
+Correções secundárias, todas medidas:
 
-- O protocolo ARQ (`lib/EspSimHub/ArqSerial.h`) fatia cada mensagem em
-  pacotes de até 32 bytes (na prática, o SimHub manda em pedaços de
-  até 16 bytes) e espera confirmação de cada um antes do próximo — um
-  frame de 270 bytes vira **~17 idas-e-voltas sequenciais**.
-- Medi com uma sonda de timing embutida (`ARQ_TIMING_TRACE`, ainda ligada
-  em `platformio.ini` como `-DARQ_TIMING_TRACE=1` — **desligar depois que
-  resolver, adiciona overhead de print por pacote**): a placa confirma
-  cada pacote em **~2ms** (mediana), mas fica **~96ms** (mediana) parada
-  esperando o próximo pedaço do PC. Em 45s de captura, 11.7s foram só
-  espera. **O firmware está inocentado** — o atraso está do lado Windows.
-- Testado e descartado: opção "Strict Baudrate Emulation" do HW VSP3
-  (desmarcada, sem efeito).
-- **TruePort nunca funcionou**: o assistente fecha sozinho ao clicar
-  "Avançar", sem erro visível. Suspeita não confirmada: ele tenta um
-  protocolo de descoberta próprio da Perle que nosso `AsyncServer` cru
-  não fala. Não foi mais investigado a fundo (usuário: "nunca consegui
-  usar o Perle").
-- **com0com**: bate em Código 52 (driver não assinado). Usuário recusou
-  usar `bcdedit /set testsigning on` (quer solução definitiva, não
-  temporária). Não seguido adiante.
+- `idle()` em `main.cpp` agora atende o UART do volante. Esse hook já era
+  chamado durante toda a espera bloqueante do ARQ e não fazia nada útil.
+- Render gate em `SHCustomProtocol::loop()`: só desenha se chegou telemetria,
+  a página mudou, ou passaram 250ms. Antes redesenhava a cada iteração, o que
+  prendia o ack do ARQ em 105ms; com o gate caiu para 5ms.
+- `drawAlert()` só repinta o overlay quando ele muda, e o `loop()` não desenha
+  a página por baixo de um overlay que a cobre. Antes eram 101ms por frame com
+  overlay ativo (3,8 fps).
+- `Serial.setTxTimeoutMs(0)` quando em modo WiFi: sem isso, com o cabo USB só
+  alimentando e ninguém lendo o CDC, cada print travava até 100ms.
 
-**Como a conexão está funcionando agora** (funcional, só lento): SimHub →
-HW VSP3 (cria COM15 ⇄ TCP 192.168.0.5:10001) → firmware.
+### Lições que custaram tempo — não repetir
 
-## Próximos passos em aberto (não decidido ainda)
+1. **Medir antes de otimizar.** Duas auditorias externas (GPT e Gemini) e eu
+   mesmo apontamos o desenho da tela como gargalo. A instrumentação mostrou que
+   o desenho inteiro custa **6,3ms de um frame de 1559ms — 0,4%**. Otimizar
+   `drawCell`/`drawAlert` ou mover a UI para o Core 0 teria dado ~0,4%.
 
-Duas linhas de solução propostas, nenhuma implementada:
+2. **`canvas` é `nullptr` neste ambiente.** `BOARD_HAS_PSRAM` não está definido
+   em `wt32-sc01-plus`, então `gfx = tft` e o desenho é direto no painel.
+   `canvas->flush()`, apontado por ambas as auditorias como custo principal,
+   **nunca executa**.
 
-1. **Plugin C# pro SimHub** (`IDataPlugin`): manda o frame telemetria
-   inteiro via TCP direto, sem o protocolo ARQ (que só faz sentido pra
-   serial não-confiável; sobre TCP é overhead puro). Eliminaria as ~17
-   idas-e-voltas por completo. Exige: DLL .NET Framework referenciando
-   `SimHub.Plugins.dll`/`GameReaderCommon.dll` da instalação do SimHub do
-   usuário; um modo novo no firmware pra ler frame cru terminado em
-   newline (mantendo o parser de campos `;` que já existe). **Eu não
-   consigo compilar nem testar isso** (não tenho Windows/SimHub) — o
-   usuário precisaria compilar aí.
-2. **UDP Relay do SimHub** (aba na barra lateral): possivelmente manda a
-   telemetria bruta do jogo em formato binário nativo (varia por jogo) em
-   vez do protocolo customizado com `;`. Ainda não confirmado — usuário
-   ia mandar print da aba e a conversa foi interrompida antes de eu ver.
-   Se o formato não for customizável, a placa teria que parsear binário
-   específico de cada jogo (pior pra manutenção) em troca de zero
-   idas-e-voltas.
+3. **Dual-core para a UI é perigoso aqui.** A task de desenho leria dezenas de
+   `String` enquanto o parser as reatribui — `String` realoca ao ser atribuída,
+   e ler durante isso é use-after-free. Este projeto já se queimou com corrida
+   sem lock (ver o comentário em `lib/FullLoopbackStream/`). Se algum dia for
+   necessário, fazer com snapshot sob mutex.
 
-**Decisão pendente com o usuário**: qual das duas linhas seguir (ou tentar
-o TruePort de novo primeiro, já que é o que a documentação do protocolo
-—eCrowne— realmente prescreve, mas o usuário já disse preferir uma ponte
-nova a insistir no Perle).
+4. **Contar separadores não substitui um terminador.** Quando o emissor supera
+   a tela, o `LoopbackStream` descarta bytes em silêncio mas a contagem já os
+   creditou — o contador mente e não há como realinhar. Só um marcador de fim
+   de frame resolve.
+
+5. **A sonda pode ser o problema.** `ARQ_TIMING_TRACE` gravava o timestamp
+   *antes* dos próprios `Serial.print`, que bloqueiam até 100ms no CDC. Corrigido,
+   mas a lição vale: instrumento que mede a si mesmo engana.
+
+## Em aberto
+
+1. **Validação com tráfego real ainda pendente.** O alinhamento de campos foi
+   verificado com um emissor sintético (`scripts/raw_align_test.py`, que planta
+   valores conhecidos e lê de volta o que a placa parseou, com frames de 68, 72
+   e 76 campos), mas o HW VSP3 caiu num reboot de OTA e não
+   reconectou sozinho, então a última medição com SimHub de verdade é anterior
+   à correção do enquadramento. **Ao voltar: clicar "Create COM" no HW VSP3 e
+   ler a porta 10004 (`scripts/perf_read.py`).** Se `short=` ficar diferente de 0 continuamente, o
+   template do SimHub emite um número de campos diferente de 72.
+
+2. **O plugin C# (`IDataPlugin`) não foi feito, e talvez não precise.** A rota
+   Custom Serial Devices + HW VSP3 já entrega os 30 fps porque o gargalo eram os
+   round trips do ARQ, não a porta virtual. O plugin só valeria para eliminar a
+   dependência do HW VSP3; ganho de taxa seria pequeno.
+
+3. **`PERF_DIAG` (porta 10004) continua instalado.** É o único jeito de
+   diagnosticar com o WiFi ligado, já que o CDC não é legível nesse modo. Se for
+   removido, tirar: o bloco `perfDiagHandle()` em `main.cpp`, os contadores
+   `pd*`/`perfFieldDump()` em `SHCustomProtocol.h`, e as marcações de fase no
+   `loop()`.
+
+4. **`drawCell()` ainda usa `getTextBounds` + `clearTextArea`.** Sugerido por
+   revisão externa trocar por padding de espaços. Não fiz: `page` custa ~5ms e
+   não é gargalo hoje. Vale só se o desenho voltar a importar.
+
+5. **Nada commitado.** `src/main_wheel.cpp` tem trabalho independente do usuário
+   (pipeline de amostragem dos halls) no mesmo working tree — commitar tudo junto
+   misturaria as duas coisas. Separar antes.
 
 ## Arquivos-chave
 

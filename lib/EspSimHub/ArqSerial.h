@@ -20,6 +20,38 @@
 // Debug stream declared in main.cpp (can be USB CDC or UART)
 extern Stream* DebugPort;
 
+// Raw transport mode, set by the TCP bridge while a client is attached to the
+// raw port (see TcpSerialBridge2). ARQ exists to make an unreliable serial link
+// reliable: 32-byte packets, CRC, per-packet acks. Over TCP that work is already
+// done by TCP itself, and all the layer still contributes is a stop-and-wait
+// round trip per packet — measured at ~92ms each over WiFi, ~17 of them per
+// telemetry frame, which is the multi-second refresh. In raw mode the byte
+// stream is consumed directly; every layer above this class is untouched,
+// because the sender emits exactly the same bytes SimHub does (0x03 'P' ...),
+// just without the ARQ framing around them.
+// Defined here rather than in the firmware's .cpp: main_wheel.cpp includes this
+// header too, and it has no TCP bridge to define them for it. This header is
+// pulled in exactly once per firmware, so a definition here suits both builds.
+volatile bool arqRawMode = false;
+
+// Frame terminator, and a flag saying the raw reader just swallowed one.
+//
+// The parser reads a fixed number of fields, but the sender's field count is not
+// under our control — a SimHub template can be edited at any time. If the two
+// disagree, a blind read runs straight past the end of one frame and into the
+// head of the next, and from then on every value lands in the wrong slot with no
+// way back. Stopping at the terminator bounds the damage to the frame that is
+// actually malformed: a short frame just leaves its trailing fields empty.
+#define RAW_FRAME_TERMINATOR '~'
+volatile bool rawFrameEnded = false;
+
+// Raw reads still need a bound so a half-delivered frame cannot wedge the loop.
+// Kept small on purpose: parsing only starts once a whole frame is buffered, so a
+// field read that has to wait at all means something is already wrong. At 50ms a
+// single bad parse cost 72 x 50ms and stalled the loop for seconds; 5ms bounds
+// the same mistake to a third of a second.
+#define ARQ_RAW_READ_TIMEOUT_MS 5
+
 #include <Arduino.h>
 #include <RingBuf.h>
 
@@ -74,11 +106,15 @@ private:
 		byte currentCrc;
 
 #if ARQ_TIMING_TRACE
-		// Lightweight timing probe (one short line per packet, not per byte)
-		// to tell apart "the device is slow to acknowledge" from "the sender
-		// is slow to send the next chunk". t_idle = how long we sat with an
-		// empty stream since the last packet was acked (i.e. waiting on the
-		// PC); t_proc = our own parse+ack cost.
+		// Lightweight timing probe (one short line per packet, not per byte).
+		// proc_ms = our own parse+ack cost. idle_ms = wall time from the last
+		// ack until we *noticed* the next chunk.
+		//
+		// Read idle_ms with care: it is not "time the PC took". It also counts
+		// any stretch where the bytes were already sitting in the stream and
+		// nothing called ProcessIncomingData() — so a slow caller looks exactly
+		// like a slow sender here. Before blaming the PC, confirm this path is
+		// really being polled at the rate you assume.
 		if (StreamAvailable() > 0 && arqTraceLastAckMicros != 0) {
 			unsigned long idleUs = micros() - arqTraceLastAckMicros;
 			Serial.print("[T] idle_ms=");
@@ -203,7 +239,12 @@ private:
 					Serial.print(length);
 					Serial.print(" proc_ms=");
 					Serial.println((nowUs - procStartUs) / 1000.0, 1);
-					arqTraceLastAckMicros = nowUs;
+					// Timestamp *after* the prints, not before: on USB CDC a
+					// write blocks for up to tx_timeout_ms when no host is
+					// draining the port, and billing that stall to the next
+					// idle window makes the sender look slow when the probe
+					// itself was the delay.
+					arqTraceLastAckMicros = micros();
 				}
 #endif
 #endif
@@ -248,6 +289,27 @@ public:
 
 	int read() {
 		unsigned long fsr_startMillis = millis();
+
+		if (arqRawMode) {
+			// Stay closed for the rest of this frame. Reporting end-of-frame once is
+			// not enough: the caller reads a fixed number of fields, so the reads
+			// after the boundary would have consumed the head of the NEXT frame and
+			// shifted every value in it by that many places. The flag is cleared by
+			// loop() just before the next frame is parsed.
+			if (rawFrameEnded) return -1;
+
+			do {
+				if (idleFunction != 0) idleFunction(false);
+				int c = StreamRead();
+				if (c == RAW_FRAME_TERMINATOR) {
+					rawFrameEnded = true;
+					return -1;
+				}
+				if (c >= 0) return c;
+			} while (millis() - fsr_startMillis < ARQ_RAW_READ_TIMEOUT_MS);
+			return -1;
+		}
+
 		do {
 			if (idleFunction != 0) idleFunction(false);
 
@@ -270,6 +332,7 @@ public:
 
 	int Available() {
 		if (idleFunction != 0) idleFunction(false);
+		if (arqRawMode) return rawFrameEnded ? 0 : StreamAvailable();
 		if (DataBuffer.size() == 0) {
 			ProcessIncomingData();
 		}

@@ -24,6 +24,23 @@
 #endif
 
 #define BRIDGE_PORT 10001 // Perle TruePort uses port 10,001 for the first serial routed to the client
+
+// Raw transport listener. A client here speaks the same bytes SimHub does
+// (0x03 'P' + ';'-separated fields) but without the ARQ framing, so no
+// per-packet acks and no stop-and-wait round trips. See ArqSerial.h.
+#define RAW_BRIDGE_PORT 10002
+
+// arqRawMode and rawFrameEnded are defined in ArqSerial.h (the wheel firmware
+// includes that header too and needs them). Only the frame tally is ours.
+volatile int rawFramesPending = 0;
+volatile bool rawResyncNeeded = false;
+volatile uint32_t rawOverflows = 0;
+volatile uint32_t rawMaxChunk = 0;
+volatile uint32_t rawMaxUsed = 0;
+volatile uint32_t rawChunks = 0;
+
+// How many frames may sit queued before we start skipping to the newest.
+#define RAW_FRAME_BACKLOG 4
 #define DEBUG_TCP_BRIDGE false // emits extra events to Serial that show network communication, set to false to save memory and make faster
 
 // OTA firmware updates over the same opt-in WiFi link (only active while
@@ -57,7 +74,12 @@
 // above the largest known frame for headroom as the protocol grows; cost is
 // ~1KB extra RAM per buffer, trivial against the ~280KB free.
 FullLoopbackStream outgoingStream(1024);
-FullLoopbackStream incomingStream(1024);
+// Sized for a couple of dozen whole frames (~300 bytes each). The virtual COM
+// port delivers in bursts, so headroom here is what keeps a burst from being
+// truncated mid-frame; measured 37 overflows in 8s at 4096 with a 20Hz sender.
+// Headroom does not fix a sender that is permanently faster than the panel,
+// though — for that the send rate has to come down.
+FullLoopbackStream incomingStream(8192);
 bool wifiTransportActive = false; // set from NVS in setup(), before ArqSerial is touched
 Preferences wifiPrefs;
 
@@ -66,7 +88,12 @@ Preferences wifiPrefs;
 // Runtime dispatch for the ARQ transport: USB Serial (default) or the WiFi
 // loopback streams (opt-in). Must be defined before FlowSerialRead.h pulls
 // in ArqSerial.h, since these override its Serial-default macros.
-int wsStreamRead() { return wifiTransportActive ? incomingStream.read() : Serial.read(); }
+int wsStreamRead() {
+	if (!wifiTransportActive) return Serial.read();
+	int c = incomingStream.read();
+	if (c == RAW_FRAME_TERMINATOR) __atomic_sub_fetch(&rawFramesPending, 1, __ATOMIC_RELAXED);
+	return c;
+}
 int wsStreamAvailable() { return wifiTransportActive ? incomingStream.available() : Serial.available(); }
 size_t wsStreamWrite(uint8_t b) { return wifiTransportActive ? outgoingStream.write(b) : Serial.write(b); }
 size_t wsStreamWrite(const char* str) { return wifiTransportActive ? outgoingStream.write(str) : Serial.write(str); }
@@ -175,6 +202,21 @@ void setup(void)
 	Serial.begin(115200);
 	Serial.setDebugOutput(true);
 
+	// The wireless transport preference decides whether the USB CDC is this
+	// session's data link or merely a debug console, so read it before the
+	// first log line. In WiFi mode nothing on the PC holds the CDC open, its
+	// ring buffer fills, and from then on every write blocks for tx_timeout_ms
+	// (100ms by default, and flush() waits again) — enough setup logging to add
+	// seconds to boot, and enough per-packet logging to swamp the ARQ timing if
+	// a diagnostic build turns it back on. Zeroing it makes stray prints drop
+	// instead of stall. Never do this on the USB path: there Serial *is* the
+	// transport and blocking until the host drains it is the correct behaviour.
+	wifiPrefs.begin("screen", false);
+	wifiTransportActive = wifiPrefs.getBool("wifiEn", false);
+	if (wifiTransportActive) {
+		Serial.setTxTimeoutMs(0);
+	}
+
 	// Wait for USB CDC to enumerate - critical for USB CDC mode
 	// This blocks until the host recognizes the device
 	unsigned long start = millis();
@@ -240,8 +282,8 @@ void setup(void)
 	// Optional WiFi telemetry link (opt-in, default OFF, applied at boot only)
 	// See the comment above the includes near the top of this file.
 	// ==========================================
-	wifiPrefs.begin("screen", false);
-	wifiTransportActive = wifiPrefs.getBool("wifiEn", false);
+	// wifiTransportActive is read from NVS at the top of setup(), so that the
+	// CDC tx timeout is already settled before anything logs.
 	if (wifiTransportActive) {
 		screenLog("WiFi mode: connecting...");
 		debugLog(">>> WiFi enabled - starting ECrowneWifi::setup() (may block up to ~120s on first-time provisioning)");
@@ -309,9 +351,72 @@ void setup(void)
 	Serial.flush();
 }
 
+// PERF_DIAG: a text dump of where loop() time goes, served on TCP 10002 so it
+// can be read over WiFi without disturbing the SimHub link on 10001. Temporary
+// — delete this block, the counters below and the pd* fields in
+// SHCustomProtocol once the hot phase is known.
+static WiFiServer perfServer(10004);
+static bool perfServerStarted = false;
+static uint32_t perfLoops = 0, perfLoopMaxUs = 0, perfUartUs = 0;
+// perfShortFrames counts frames that ended before the parser had all its fields
+// (sender emits fewer than the parser reads) — those show blank trailing values.
+// perfFullFrames counts the normal case, where the parser got everything and the
+// terminator was still waiting to be discarded.
+static uint32_t perfShortFrames = 0, perfFullFrames = 0;
+static unsigned long perfSinceMs = 0;
+
+static void perfDiagHandle()
+{
+	if (!perfServerStarted) {
+		perfServer.begin();
+		perfServer.setNoDelay(true);
+		perfServerStarted = true;
+		perfSinceMs = millis();
+	}
+	WiFiClient c = perfServer.available();
+	if (!c) return;
+
+	const uint32_t f = shCustomProtocol.pdFrames ? shCustomProtocol.pdFrames : 1;
+	const unsigned long win = millis() - perfSinceMs;
+	c.printf("window_ms=%lu loops=%lu loop_max_us=%lu uart_us_total=%lu\n",
+	         win, (unsigned long)perfLoops, (unsigned long)perfLoopMaxUs,
+	         (unsigned long)perfUartUs);
+	c.printf("frames=%lu  fps=%.1f  frame_max_us=%lu\n",
+	         (unsigned long)shCustomProtocol.pdFrames,
+	         win ? shCustomProtocol.pdFrames * 1000.0 / win : 0.0,
+	         (unsigned long)shCustomProtocol.pdFrameMaxUs);
+	c.printf("avg per frame (us): page=%lu alert=%lu indicator=%lu leds=%lu\n",
+	         (unsigned long)(shCustomProtocol.pdPageUs / f),
+	         (unsigned long)(shCustomProtocol.pdAlertUs / f),
+	         (unsigned long)(shCustomProtocol.pdIndUs / f),
+	         (unsigned long)(shCustomProtocol.pdLedUs / f));
+	c.printf("canvas=%s raw_mode=%d overlay_paints=%lu short=%lu full=%lu overflow=%lu\n",
+	         canvas ? "present" : "nullptr", arqRawMode ? 1 : 0,
+	         (unsigned long)shCustomProtocol.pdOverlayPaints,
+	         (unsigned long)perfShortFrames, (unsigned long)perfFullFrames,
+	         (unsigned long)rawOverflows);
+	c.printf("chunks=%lu max_chunk=%lu max_used=%lu\n",
+	         (unsigned long)rawChunks, (unsigned long)rawMaxChunk, (unsigned long)rawMaxUsed);
+	c.println(shCustomProtocol.perfFieldDump());
+
+	c.flush();
+	c.stop();
+
+	shCustomProtocol.pdFrames = 0;
+	shCustomProtocol.pdPageUs = shCustomProtocol.pdAlertUs = 0;
+	shCustomProtocol.pdIndUs = shCustomProtocol.pdLedUs = 0;
+	shCustomProtocol.pdFrameMaxUs = 0;
+	shCustomProtocol.pdOverlayPaints = 0;
+	perfLoops = perfLoopMaxUs = perfUartUs = 0;
+	perfShortFrames = perfFullFrames = 0;
+	rawMaxChunk = rawMaxUsed = rawChunks = rawOverflows = 0;
+	perfSinceMs = millis();
+}
+
 void loop()
 {
   static bool waitingLogged = false;
+  const uint32_t perfT0 = micros();
 
   buzzerUpdate(); // Non-blocking buzzer timeout handler
 
@@ -323,13 +428,79 @@ void loop()
   if (wifiTransportActive) {
     ECrowneWifi::loop();
     ArduinoOTA.handle();
+    perfDiagHandle();
   }
 
   // Re-enabled: display updates
   shCustomProtocol.loop();
   yield(); // Feed watchdog
 
-	if (FlowSerialAvailable() > 0) {
+	if (arqRawMode) {
+		// Raw transport: this stream carries telemetry frames and nothing else,
+		// so there is no command byte to dispatch on and the 0x03/'P' header is
+		// pure cost. Dropping it lets the sender be SimHub's stock custom
+		// protocol template with nothing prepended, which matters because
+		// SimHub's NCalc has no chr() — a header would have forced the whole
+		// 72-field formula to be rewritten in JavaScript just to emit one byte.
+		// Parse only once a WHOLE frame has arrived. Starting on a partial frame
+		// makes the last fields time out empty and leaves the remainder in the
+		// buffer, so every later frame is read one field out of step — which is
+		// the scrambled layout, not a transport fault.
+		int c;
+		int guard = 0;
+
+		// The buffer overflowed, so a frame in there is missing bytes. Everything up
+		// to the next boundary is untrustworthy — bin it rather than parse a half
+		// frame, which would put values in the wrong fields from here on.
+		if (rawResyncNeeded) {
+			rawResyncNeeded = false;
+			// Empty the buffer and zero the tally — do not just skip a frame.
+			//
+			// On overflow the dropped bytes had already been counted, so the tally
+			// says frames are waiting that are not there. Parsing then starts on an
+			// empty buffer and every field burns the read timeout, which stalls the
+			// loop long enough for more data to pile up and overflow again. That
+			// feedback loop is what pinned this at 5 fps with the fields shifted.
+			while (wsStreamRead() >= 0) { /* discard */ }
+			__atomic_store_n(&rawFramesPending, 0, __ATOMIC_RELAXED);
+		}
+
+		// Only whole frames are worth parsing: starting on a partial one leaves the
+		// trailing fields empty and the remainder in the buffer, which is what put
+		// every value in the wrong cell.
+		if (__atomic_load_n(&rawFramesPending, __ATOMIC_RELAXED) > 0) {
+
+			// Genuinely behind the sender? Skip to the newest frame — the stale ones
+			// would only be drawn and instantly replaced.
+			//
+			// The threshold is not 1. The virtual COM port delivers in bursts, so a
+			// few frames arriving together is normal rather than a backlog, and
+			// dropping all but the last threw away two thirds of them (6fps out of a
+			// 20Hz sender the panel could easily have kept up with). Only a queue
+			// deeper than the panel can absorb is worth discarding; the 4096-byte
+			// buffer holds around a dozen frames, so this has room to spare.
+			while (__atomic_load_n(&rawFramesPending, __ATOMIC_RELAXED) > RAW_FRAME_BACKLOG && guard++ < 32) {
+				do { c = wsStreamRead(); } while (c >= 0 && c != RAW_FRAME_TERMINATOR);
+			}
+
+			lastSerialActivity = millis();
+			rawFrameEnded = false;
+			Command_CustomProtocolData();
+
+			if (rawFrameEnded) {
+				// The parser stopped ON the boundary: this frame carried fewer fields
+				// than it wanted, so the tail came back empty and the terminator is
+				// already consumed. Draining again here would eat the next frame.
+				perfShortFrames++;
+			} else {
+				// The frame had more fields than the parser reads (or was clipped by an
+				// overflow): bin the remainder so the next parse starts on a boundary.
+				perfFullFrames++;
+				do { c = wsStreamRead(); } while (c >= 0 && c != RAW_FRAME_TERMINATOR);
+			}
+		}
+	}
+	else if (FlowSerialAvailable() > 0) {
 		int r = FlowSerialTimedRead();
 
 		if (r == MESSAGE_HEADER)
@@ -381,12 +552,45 @@ void loop()
 	}
 
 	// Processa mensagens do ButtonBox via UART
+	const uint32_t perfUartT0 = micros();
 	handleButtonBoxUart();
+	perfUartUs += micros() - perfUartT0;
+
+	const uint32_t perfEl = micros() - perfT0;
+	if (perfEl > perfLoopMaxUs) perfLoopMaxUs = perfEl;
+	perfLoops++;
 }
 
 void idle(bool critical) {
 	yield(); // Feed watchdog
 	shCustomProtocol.idle();  // Re-enabled: idle updates
+
+	// Service the wheel's UART from here too.
+	//
+	// The ARQ layer parks in this hook while it waits on the PC: ARQSerial::read()
+	// spins for up to 400ms per field, and SHCustomProtocol::read() pulls one
+	// field per ';', so a single telemetry frame can hold loop() for seconds
+	// (measured: loop_max 2.69s, of which the whole redraw was 6ms). Without
+	// this call, handleButtonBoxUart() cannot run for that entire stretch, which
+	// is exactly the MFC/menu lag — same root cause as the slow dashboard, not a
+	// UART problem.
+	//
+	// This runs on the `critical` path too. That path is Arq_TimedRead(), which
+	// waits up to 100ms for a single byte, so skipping it left the exact stall
+	// we are trying to cover. The rate limit below is what makes it affordable:
+	// at most 500 scans/s of an empty UART, a few microseconds each.
+	//
+	// Guards: rate limit, and block re-entry — processButtonBoxLine() can write
+	// NVS or the filesystem, and must never be started twice.
+	(void)critical;
+	static bool inIdleUart = false;
+	static unsigned long lastIdleUartMs = 0;
+	const unsigned long nowMs = millis();
+	if (inIdleUart || (nowMs - lastIdleUartMs) < 2) return;
+	inIdleUart = true;
+	lastIdleUartMs = nowMs;
+	handleButtonBoxUart();
+	inIdleUart = false;
 }
 
 // ================================

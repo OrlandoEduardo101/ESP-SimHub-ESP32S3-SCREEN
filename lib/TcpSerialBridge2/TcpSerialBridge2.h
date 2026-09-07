@@ -9,6 +9,42 @@
 #include <FullLoopbackStream.h>
 #include <GFXHelpers.h>
 
+// Also declared in ArqSerial.h, which main.cpp includes after this header;
+// repeated so the bridge can flip the transport without depending on order.
+extern volatile bool arqRawMode;
+
+// Complete frames sitting unread in the incoming buffer, counted by their
+// terminator. Incremented here (the AsyncTCP task) and decremented as the
+// parser consumes them (the loop task), hence the atomics.
+//
+// Counting field separators instead was not enough: when the sender outruns the
+// panel the buffer overflows and LoopbackStream drops bytes silently, while the
+// count had already been credited for them. The tally then lies forever and the
+// field order never recovers. A terminator gives an unambiguous frame boundary
+// to resynchronise on, so an overflow costs one frame instead of the session.
+extern volatile int rawFramesPending;
+
+// Raised when the incoming buffer could not take a chunk whole. LoopbackStream
+// drops the excess silently, so a frame gets cut in half and every field after
+// it reads one place out of step — which is how a fuel figure ended up in the
+// penalty overlay. The loop discards up to the next terminator when it sees this.
+extern volatile bool rawResyncNeeded;
+extern volatile uint32_t rawOverflows;
+// PERF_DIAG: how the sender actually delivers — biggest single chunk, and the
+// high-water mark of the buffer. Tells apart 'panel too slow' from 'sender
+// dumps more at once than the buffer holds'.
+extern volatile uint32_t rawMaxChunk;
+extern volatile uint32_t rawMaxUsed;
+extern volatile uint32_t rawChunks;
+
+// Frame terminator the sender appends (defined in ArqSerial.h, repeated here
+// because this header is included first). A plain printable character on
+// purpose: SimHub's NCalc has no chr(), so a control byte would have forced the
+// whole 72-field formula to be rewritten in JavaScript just to emit it.
+#ifndef RAW_FRAME_TERMINATOR
+#define RAW_FRAME_TERMINATOR '~'
+#endif
+
 
 #if DEBUG_TCP_BRIDGE
 // all the logs, more memory usage
@@ -249,6 +285,18 @@ static void handleError(void* arg, AsyncClient* client, int8_t error) {
 #endif
 }
 
+// A client on the raw port disconnecting must put the ARQ transport back, or a
+// later HW VSP3 session would be parsed as raw and never sync.
+static void handleRawDisconnect(void* arg, AsyncClient* client) {
+    arqRawMode = false;
+    __atomic_store_n(&rawFramesPending, 0, __ATOMIC_RELAXED);
+    std::vector<AsyncClient*>::iterator it = clients.begin();
+    while (it != clients.end()) {
+        if ((*it) == client) { it = clients.erase(it); break; }
+        else ++it;
+    }
+}
+
 static void handleDisconnect(void* arg, AsyncClient* client) {
 #if DEBUG_TCP_BRIDGE
 	Serial.printf("\n client %s disconnected \n", client->remoteIP().toString().c_str());
@@ -272,7 +320,8 @@ static void handleTimeOut(void* arg, AsyncClient* client, uint32_t time) {
 class TcpSerialBridge2
 {
 public:
-  TcpSerialBridge2(uint16_t tcpPort) : server(tcpPort) {}
+  TcpSerialBridge2(uint16_t tcpPort, uint16_t rawPort)
+    : server(tcpPort), rawServer(rawPort) {}
 
   void setup(FullLoopbackStream *outgoingStream, FullLoopbackStream *incomingStream, Arduino_GFX *gfx) {
 #if DEBUG_TCP_BRIDGE
@@ -490,6 +539,22 @@ public:
       client->onTimeout(&handleTimeOut, NULL);
     }, &server);
     server.begin();
+
+    // Second listener: the transport is chosen by the port the client lands on,
+    // so nothing needs a setting, a gesture or a reboot. The existing port keeps
+    // speaking ARQ for HW VSP3 exactly as before; only this one is new.
+    rawServer.setNoDelay(true);
+    rawServer.onClient([this](void *arg, AsyncClient* client){
+      // Front of the vector, because flush() writes to clients.front() and this
+      // client owns the session while it is attached.
+      clients.insert(clients.begin(), client);
+      arqRawMode = true;
+      client->onData([&](void* arg, AsyncClient* client, void *data, size_t len){ this->handleData(arg, client, data, len); }, NULL);
+      client->onError(&handleError, NULL);
+      client->onDisconnect(&handleRawDisconnect, NULL);
+      client->onTimeout(&handleTimeOut, NULL);
+    }, &rawServer);
+    rawServer.begin();
   }
   
   void loop() {
@@ -538,10 +603,29 @@ private:
     Serial.println(" ");
 #endif
     const uint8_t *castData = (uint8_t*)data;
+    if (arqRawMode) {
+      rawChunks++;
+      if (len > rawMaxChunk) rawMaxChunk = len;
+      {
+        const uint32_t used = 8192 - (uint32_t)this->incomingStream->availableForWrite();
+        if (used > rawMaxUsed) rawMaxUsed = used;
+      }
+      if ((int)len > this->incomingStream->availableForWrite()) {
+        // Sender is ahead of the panel and this chunk will not fit. Whatever is
+        // buffered is about to be truncated mid-frame, so mark it for resync
+        // rather than let a half frame be parsed as a whole one.
+        rawResyncNeeded = true;
+        rawOverflows++;
+      }
+      for (size_t i = 0; i < len; i++) {
+        if (castData[i] == RAW_FRAME_TERMINATOR) __atomic_add_fetch(&rawFramesPending, 1, __ATOMIC_RELAXED);
+      }
+    }
     this->incomingStream->write(castData, (size_t)len);
   }
 
   AsyncServer server;
+  AsyncServer rawServer;
   FullLoopbackStream *incomingStream;
   FullLoopbackStream *outgoingStream;
 

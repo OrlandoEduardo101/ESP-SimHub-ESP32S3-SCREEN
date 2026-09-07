@@ -2,7 +2,7 @@
 #include <FullLoopbackStream.h>
 #include <Arduino_GFX_Library.h>
 
-TcpSerialBridge2 instance(BRIDGE_PORT);
+TcpSerialBridge2 instance(BRIDGE_PORT, RAW_BRIDGE_PORT);
 
 class ECrowneWifi {
     public:
