@@ -398,6 +398,15 @@ uint8_t neoPixelBusGetLuminance() {
 #define COLOR_ABS_ACTIVE RgbColor(255, 100, 0)  // Orange for ABS cutting brake
 #define COLOR_DRS_AVAILABLE RgbColor(0, 255, 0)  // Green when DRS available
 #define COLOR_DRS_ACTIVE RgbColor(0, 200, 255)   // Cyan when DRS active
+
+// Where the RPM bar starts filling, as a percentage of the rev range.
+//
+// A shift bar answers one question: shift now or not. Mapping it from zero spent
+// half its length on rotation nobody reads — at 50% RPM nine of the eighteen LEDs
+// were already lit, leaving five for everything above 77%, which is the only part
+// actually being looked at. Starting here gives the whole bar to the decision.
+// Raise it for a peakier engine, lower it if the bar feels too eager.
+#define RPM_BAR_START_PERCENT 55
 #define COLOR_RPM_LOW RgbColor(0, 255, 0)        // Green for low RPM
 #define COLOR_RPM_MID RgbColor(255, 255, 0)      // Yellow for mid RPM
 #define COLOR_RPM_HIGH RgbColor(255, 50, 0)      // Orange for high RPM
@@ -602,52 +611,86 @@ void updateCustomLEDs(
         }
     }
 
-    // === CENTER LEDs (3-17): RPM METER with DRS ===
-    int numLedsToLight = 0;
+    // === CENTER LEDs: RPM METER with DRS ===
 
-    // Calculate how many LEDs to light based on RPM
-    if (rpmPercent > 0) {
-        numLedsToLight = (rpmPercent * LED_RPM_COUNT) / 100;
-        if (numLedsToLight > LED_RPM_COUNT) numLedsToLight = LED_RPM_COUNT;
+    // Rescale the raw percentage onto the shift window (see RPM_BAR_START_PERCENT).
+    // Below the window the bar stays dark, which is also a cue in itself.
+    float barPercent = 0.0f;
+    if (rpmPercent > RPM_BAR_START_PERCENT) {
+        barPercent = ((float)(rpmPercent - RPM_BAR_START_PERCENT) * 100.0f)
+                   / (float)(100 - RPM_BAR_START_PERCENT);
+        if (barPercent > 100.0f) barPercent = 100.0f;
+    }
+
+    int numLedsToLight = (int)(((barPercent * LED_RPM_COUNT) / 100.0f) + 0.5f);
+    if (numLedsToLight > LED_RPM_COUNT) numLedsToLight = LED_RPM_COUNT;
+
+    // The car's own redline setting goes through the same rescale so it keeps
+    // meaning something, then is capped so the red zone never shrinks below the
+    // last three LEDs. Previously red landed on exactly one LED of eighteen — the
+    // most important cue on the bar was also the least visible.
+    float redAt = 84.0f;
+    if (rpmRedLine > RPM_BAR_START_PERCENT && rpmRedLine < 100) {
+        const float r = ((float)(rpmRedLine - RPM_BAR_START_PERCENT) * 100.0f)
+                      / (float)(100 - RPM_BAR_START_PERCENT);
+        if (r < redAt) redAt = r;
     }
 
     // Determine if DRS is available or active
     bool hasDRS = (drsAvailable == "1" || drsActive == "1");
     RgbColor drsColor = (drsActive == "1") ? COLOR_DRS_ACTIVE : COLOR_DRS_AVAILABLE;
 
-    // Light up RPM LEDs with progressive colors
-    for (int i = 0; i < LED_RPM_COUNT; i++) {
-        if (i < numLedsToLight) {
-            int ledIndex = LED_RPM_START + i;
-            RgbColor ledColor;
+    // Built into a local array first so the end LEDs can copy their neighbours
+    // before anything reaches the strip. Reading colours back from NeoPixelBusLg
+    // would return them gamma-corrected, and re-applying that would darken them.
+    RgbColor bar[LED_RPM_COUNT];
 
-            // Calculate RPM segment percentage
-            float segmentPercent = ((float)(i + 1) / LED_RPM_COUNT) * 100.0;
-
-            // Choose color based on RPM segment
-            if (hasDRS) {
-                // If DRS available/active, show DRS color
-                ledColor = drsColor;
-            } else if (segmentPercent < 60) {
-                // Low RPM - Green
-                ledColor = COLOR_RPM_LOW;
-            } else if (segmentPercent < 80) {
-                // Mid RPM - Yellow
-                ledColor = COLOR_RPM_MID;
-            } else if (segmentPercent < rpmRedLine) {
-                // High RPM - Orange
-                ledColor = COLOR_RPM_HIGH;
-            } else {
-                // Redline - Red (flashing if shift light triggered)
-                if (shiftLightTrigger && (millis() / 100) % 2 == 0) {
-                    ledColor = COLOR_OFF;  // Flash off
-                } else {
-                    ledColor = COLOR_RPM_REDLINE;
-                }
+    if (shiftLightTrigger) {
+        // At the shift point the whole bar flashes. Nothing else on the rim should
+        // be competing for attention at that moment, so this deliberately ignores
+        // the gradient and DRS.
+        const bool flashOff = (millis() / 80) % 2 == 0;
+        for (int i = 0; i < LED_RPM_COUNT; i++) {
+            bar[i] = flashOff ? COLOR_OFF : COLOR_RPM_REDLINE;
+        }
+    } else {
+        for (int i = 0; i < LED_RPM_COUNT; i++) {
+            if (i >= numLedsToLight) {
+                bar[i] = COLOR_OFF;
+                continue;
             }
 
-            neoLedStrip.SetPixelColor(ledIndex, ledColor);
+            // Position of this LED along the bar, not the raw RPM: the colour zones
+            // are fixed marks on the rim, the way a shift bar is read.
+            const float segmentPercent = ((float)(i + 1) / LED_RPM_COUNT) * 100.0f;
+
+            if (hasDRS) {
+                // DRS recolours the bar but does not change how far it fills — the
+                // level still reads as RPM.
+                bar[i] = drsColor;
+            } else if (segmentPercent < 35.0f) {
+                bar[i] = COLOR_RPM_LOW;      // green
+            } else if (segmentPercent < 60.0f) {
+                bar[i] = COLOR_RPM_MID;      // yellow
+            } else if (segmentPercent < redAt) {
+                bar[i] = COLOR_RPM_HIGH;     // orange
+            } else {
+                bar[i] = COLOR_RPM_REDLINE;  // red
+            }
         }
+    }
+
+    // The two outermost LEDs sit in the rim corners and are barely visible from the
+    // driving position, so they mirror their neighbours rather than carry a step of
+    // their own. Costs one step out of eighteen and stops the bar from looking like
+    // it has dead ends.
+    if (LED_RPM_COUNT >= 4) {
+        bar[0] = bar[1];
+        bar[LED_RPM_COUNT - 1] = bar[LED_RPM_COUNT - 2];
+    }
+
+    for (int i = 0; i < LED_RPM_COUNT; i++) {
+        neoLedStrip.SetPixelColor(LED_RPM_START + i, bar[i]);
     }
 
     // === RIGHT SIDE LEDs (18-20): FLAGS, ALERTS & SPOTTER RIGHT ===
