@@ -171,6 +171,26 @@ private:
 	unsigned long alertStartTime = 0;
 	bool alertWasShowing = false;  // Track if alert was displayed to trigger clear
 	bool needsFullRedraw = false;  // Flag to trigger full screen redraw after alert
+
+	// Rendering gate (see loop()). redrawPending is raised whenever something
+	// the screen shows can have changed; the heartbeat refreshes anyway so
+	// time-based state (overlay expiry) still resolves without a flag of its own.
+	bool redrawPending = true;
+
+	// Overlay repaint latch. A full-screen overlay only needs painting when its
+	// content changes: loop() stops drawing the page underneath while one is up,
+	// so the pixels survive between frames. Repainting it every frame measured
+	// 101ms per frame (3.8 fps) against 46us with no overlay.
+	String paintedOverlayText = "";
+	uint16_t paintedOverlayBg = 0;
+	uint8_t paintedBlinkPhase = 0xFF;
+
+	// Half-period of the alert blink. Blinking is affordable precisely because the
+	// overlay is latched: this repaints a couple of times a second instead of on
+	// every frame, which is what used to cost 101ms per frame.
+	static const unsigned long ALERT_BLINK_MS = 350;
+	unsigned long lastRedrawMs = 0;
+	static const unsigned long REDRAW_HEARTBEAT_MS = 250;
 	bool timingFrameDrawn = false; // Flag: timing page static frame already drawn
 	bool telemFrameDrawn  = false;
 	bool advFrameDrawn    = false;
@@ -432,7 +452,27 @@ private:
 		loadingScreenShown = true;
 	}
 public:
+	// PERF_DIAG: temporary per-phase draw timing, read over TCP 10002 by
+	// main.cpp. Remove once the hot phase is identified. gfx is the raw panel
+	// here (no PSRAM -> canvas is nullptr), so every primitive is bus I/O.
+	volatile uint32_t pdFrames = 0;
+	volatile uint32_t pdPageUs = 0, pdAlertUs = 0, pdIndUs = 0, pdLedUs = 0;
+	volatile uint32_t pdFrameMaxUs = 0;
+	volatile uint32_t pdOverlayPaints = 0;   // times the overlay was actually repainted
+
+	// PERF_DIAG: parsed values of a few well-spaced fields. Comparing these with
+	// what SimHub shows proves alignment in one look — a value landing in the
+	// wrong one of these is a field-offset bug, not a rendering bug.
+	String perfFieldDump() {
+		return "speed=" + speed + " gear=" + gear + " sessTime=" + sessionTimeLeft +
+		       " flag=" + currentFlag + " pen=" + currentPenalties +
+		       " alert=" + alertMessage + " track=" + trackId +
+		       " overlay=[" + activeOverlayText + "]" +
+		       " map=" + String(findTrackMap(trackId) ? "FOUND" : "none");
+	}
 	void showPopup(const String &msg, uint32_t durationMs = 2000) {
+		// Draw it on the next loop() instead of waiting for the 250ms heartbeat.
+		redrawPending = true;
 		uartPopupMessage = msg;
 		popupFromUart = true;
 		popupFromUartUntil = millis() + durationMs;
@@ -713,6 +753,8 @@ public:
 
 	// Called when new data is coming from computer
 	void read() {
+		// Fresh telemetry: let loop() draw one frame for it.
+		redrawPending = true;
 		if (!hasReceivedData) {
 			hasReceivedData = true;
 			if (displayEnabled && gfx != nullptr) {
@@ -878,6 +920,7 @@ public:
 		if (currentPage != lastPage) {
 			resetDrawCache();
 			lastPage = currentPage;
+			redrawPending = true;
 		}
 
 		// DRS rising-edge detection: beep once when DRS becomes available
@@ -898,14 +941,53 @@ public:
 			return;
 		}
 
+		// Rendering gate.
+		//
+		// Everything below ends in canvas->flush(), a full-framebuffer push over
+		// the parallel bus, and main.cpp's loop() only polls the SimHub link
+		// *after* this function returns. Redrawing on every iteration therefore
+		// pinned the ARQ ack latency to one whole frame time (~105ms, measured
+		// against an idle board over TCP with a 4-9ms network RTT). ARQ is
+		// stop-and-wait, so a ~270-byte telemetry frame paid that once per
+		// 32-byte packet — about 17 times, which is the multi-second refresh.
+		//
+		// Drawing only when something can actually have changed leaves the loop
+		// free to service the link at full speed in between. The heartbeat is the
+		// safety net for time-based state: drawAlert() uses millis() purely for
+		// overlay expiry (no blinking), so 250ms granularity is invisible.
+		{
+			const unsigned long nowMs = millis();
+			if (!redrawPending && !needsFullRedraw &&
+			    (nowMs - lastRedrawMs) < REDRAW_HEARTBEAT_MS) {
+				return;
+			}
+			redrawPending = false;
+			lastRedrawMs = nowMs;
+		}
+		const uint32_t pdT0 = micros();
+
 		// Check if we need full redraw after alert expired
 		if (needsFullRedraw) {
 			gfx->fillScreen(BLACK);
 			resetDrawCache();  // Clear all caches
 			needsFullRedraw = false;
+			paintedOverlayText = "";  // the overlay was wiped too, so force a repaint
 		}
 
+		// An overlay covers the whole dashboard, so drawing the page under it is
+		// invisible work — and it was that repaint which forced drawAlert() to
+		// redraw the overlay every frame just to avoid being erased. Skipping both
+		// is what turns a permanent 101ms/frame cost into a one-off.
+		const bool overlayUp = overlayIsShowing();
+
+		// Drawing the page invalidates whatever overlay is on the panel: the box does
+		// not cover the full screen, so an alert that expires and is immediately
+		// relatched with the same text would keep its old pixels while telemetry is
+		// painted over them. That is the leak where values showed through the flag.
+		if (!overlayUp) paintedOverlayText = "";
+
 		// Draw page-specific content
+		if (!overlayUp)
 		switch (currentPage) {
 			case PAGE_RACE:
 				drawRacePageContent();
@@ -933,11 +1015,15 @@ public:
 				break;
 		}
 
+		const uint32_t pdT1 = micros();
+
 		// Draw alerts (flags, penalties, etc.) on top of everything
 		drawAlert();
+		const uint32_t pdT2 = micros();
 
 		// Draw page indicator at bottom
-		drawPageIndicator();
+		if (!overlayUp) drawPageIndicator();
+		const uint32_t pdT3 = micros();
 
 		// Update LED strip with current telemetry data
 		#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
@@ -956,8 +1042,19 @@ public:
 		);
 		#endif
 
+		const uint32_t pdT4 = micros();
+
 		// Flush canvas to display (double-buffered rendering)
 		if (canvas) canvas->flush();
+
+		// PERF_DIAG accounting
+		pdPageUs  += pdT1 - pdT0;
+		pdAlertUs += pdT2 - pdT1;
+		pdIndUs   += pdT3 - pdT2;
+		pdLedUs   += pdT4 - pdT3;
+		const uint32_t pdTotal = micros() - pdT0;
+		if (pdTotal > pdFrameMaxUs) pdFrameMaxUs = pdTotal;
+		pdFrames++;
 	}
 
 	void drawPageIndicator() {
@@ -1769,13 +1866,50 @@ public:
 	}
 
 	// ── Track Map Helpers ──────────────────────────────────────
+	// Shortest alias allowed to match as a bare substring. See findTrackMap().
+	static const uint8_t TRACK_ALIAS_MIN_SUBSTRING = 6;
+
+	// True when `needle` appears in `hay` as a whole word — i.e. not glued to a
+	// letter or digit on either side. Separator characters differ per sim
+	// ('_', '-', ' '), so anything non-alphanumeric counts as a boundary.
+	static bool trackTokenMatch(const String& hay, const char* needle) {
+		const int nlen = strlen(needle);
+		if (nlen == 0) return false;
+		int at = hay.indexOf(needle);
+		while (at >= 0) {
+			const bool leftOk  = (at == 0) || !isAlphaNumeric(hay[at - 1]);
+			const bool rightOk = (at + nlen >= (int)hay.length()) || !isAlphaNumeric(hay[at + nlen]);
+			if (leftOk && rightOk) return true;
+			at = hay.indexOf(needle, at + 1);
+		}
+		return false;
+	}
+
+	// Resolve SimHub's TrackId to a stored map.
+	//
+	// The same circuit arrives under different names depending on the sim and the
+	// mod ("spa", "spa_francorchamps", "ks_barcelona", "monza_1966"), so matching
+	// has to be loose. But loose on its own is wrong: a bare substring pass makes
+	// the alias "spa" match a track called "spain". Hence three passes, strictest
+	// first — exact, then whole word, and only then substring.
 	const TrackMapEntry* findTrackMap(const String& tid) {
 		String lower = tid;
 		lower.toLowerCase();
+		lower.trim();
+		if (lower.length() == 0) return nullptr;
+
 		for (uint8_t i = 0; i < TRACK_MAP_COUNT; i++) {
-			if (lower.indexOf(TRACK_MAP_TABLE[i].id) >= 0) {
-				return &TRACK_MAP_TABLE[i];
-			}
+			if (lower == TRACK_MAP_TABLE[i].id) return &TRACK_MAP_TABLE[i];
+		}
+		for (uint8_t i = 0; i < TRACK_MAP_COUNT; i++) {
+			if (trackTokenMatch(lower, TRACK_MAP_TABLE[i].id)) return &TRACK_MAP_TABLE[i];
+		}
+		// Last resort, for ids that run words together ("spafrancorchamps"). Only
+		// aliases long enough to be unmistakable take part: allowing short ones here
+		// is what made "spa" match a circuit called "spain".
+		for (uint8_t i = 0; i < TRACK_MAP_COUNT; i++) {
+			if (strlen(TRACK_MAP_TABLE[i].id) < TRACK_ALIAS_MIN_SUBSTRING) continue;
+			if (lower.indexOf(TRACK_MAP_TABLE[i].id) >= 0) return &TRACK_MAP_TABLE[i];
 		}
 		return nullptr;
 	}
@@ -1915,7 +2049,15 @@ public:
 					gfx->fillCircle(dx, dy, 5, GRN); gfx->drawCircle(dx, dy, 6, WHITE);
 				}
 			} else {
+				// No stored map for this circuit, so positions go on a plain ring.
+				// Label it: an unexplained oval reads as a broken minimap, when the
+				// real message is "this TrackId is not in TRACK_MAP_TABLE yet". The
+				// id shown is exactly the string to add as an alias.
 				const int mCX=132, mCY=172, mRX=108, mRY=108;
+				gfx->setTextColor(RGB565(120,120,130)); gfx->setTextSize(1);
+				gfx->setCursor(20, 56); gfx->print("NO MAP FOR:");
+				gfx->setTextColor(RGB565(200,200,60));
+				gfx->setCursor(20, 68); gfx->print(trackId.substring(0, 28));
 				gfx->drawEllipse(mCX, mCY, mRX, mRY, RGB565(60,60,60));
 				gfx->drawEllipse(mCX, mCY, mRX-1, mRY-1, RGB565(80,80,80));
 				if (aPos > 0.001f) { float a=aPos*TWO_PI-HALF_PI; int x=mCX+(int)(mRX*cos(a)),y=mCY+(int)(mRY*sin(a)); gfx->fillCircle(x,y,4,RD); }
@@ -2608,6 +2750,40 @@ public:
 	}
 
 	// Draw alerts/flags in the center of the screen
+	// True while a full-screen overlay covers the dashboard. Mirrors the
+	// showingNow condition inside drawAlert().
+	bool overlayIsShowing() {
+		return activeOverlayText.length() > 0 && millis() < activeOverlayUntil;
+	}
+
+	// Only alerts we actually know how to label reach the screen.
+	//
+	// Everything on the SimHub side is a text field, so any glitch upstream — a
+	// truncated frame, a template edit — lands here as an arbitrary string and used
+	// to be rendered full-screen as if it meant something. That is how a session
+	// clock ("05:10:15") and a fuel figure ("PENALTY: 12.62") became alerts. The
+	// set below is exactly what customProtocol-dashBoard.txt can emit plus what
+	// this firmware raises itself; anything else is dropped rather than shown.
+	//
+	// Wheel/MFC popups are NOT filtered here — those come over the local UART with
+	// text the user chose, and are trusted.
+	static bool isKnownAlertText(const String& upper) {
+		static const char* const EXACT[] = {
+			"ENGINE OFF", "PIT LIMITER", "LOW FUEL", "FINISHED",
+			"GREEN FLAG", "YELLOW FLAG", "BLUE FLAG", "WHITE FLAG", "RED FLAG",
+			"BLACK FLAG", "MEATBALL", "SLOW CAR"
+		};
+		for (uint8_t i = 0; i < sizeof(EXACT) / sizeof(EXACT[0]); i++) {
+			if (upper == EXACT[i]) return true;
+		}
+		// Labelled value alerts: the label is fixed, the number is not.
+		static const char* const PREFIX[] = { "BIAS:", "TC LEVEL:", "ABS LEVEL:", "MAP:", "PENALTY:" };
+		for (uint8_t i = 0; i < sizeof(PREFIX) / sizeof(PREFIX[0]); i++) {
+			if (upper.startsWith(PREFIX[i])) return true;
+		}
+		return false;
+	}
+
 	void drawAlert() {
 		if (!canUseDisplay()) return;
 
@@ -2626,6 +2802,7 @@ public:
 			alertUpper != "NORMAL" &&
 			alertUpper != "NONE" &&
 			alertUpper != "0" &&
+			isKnownAlertText(alertUpper) &&
 			isValidAlertString(alertUpper)) {
 			String alertText = cleanAlertText(alertNormalized);
 			uint16_t bgColor = BLACK;
@@ -2644,6 +2821,7 @@ public:
 			simhubPopupUpper != "NORMAL" &&
 			simhubPopupUpper != "NONE" &&
 			simhubPopupUpper != "0" &&
+			isKnownAlertText(simhubPopupUpper) &&
 			isValidAlertString(simhubPopupUpper)) {
 			String alertText = cleanAlertText(simhubPopupNormalized);
 			uint16_t bgColor = BLACK;
@@ -2734,7 +2912,15 @@ public:
 		}
 
 		// Check for penalty changes (fallback)
-		if (!hasCriticalSimhubAlert && currentPenalties != prevPenalties && currentPenalties.toInt() > 0) {
+		// A real penalty count is a small whole number. Requiring that rejects the
+		// times and decimals that a misread frame drops into this field, which is
+		// what produced "PENALTY: 05:10:15" with no penalty in the game at all.
+		bool penaltyIsCount = currentPenalties.length() > 0 && currentPenalties.length() <= 3;
+		for (uint16_t i = 0; penaltyIsCount && i < currentPenalties.length(); i++) {
+			if (!isDigit(currentPenalties[i])) penaltyIsCount = false;
+		}
+		if (!hasCriticalSimhubAlert && penaltyIsCount &&
+		    currentPenalties != prevPenalties && currentPenalties.toInt() > 0) {
 			prevPenalties = currentPenalties;
 			latchOverlay(
 				"PENALTY: " + currentPenalties,
@@ -2748,7 +2934,31 @@ public:
 		bool showingNow = activeOverlayText.length() > 0 && now < activeOverlayUntil;
 
 		if (showingNow) {
-	            if (activeOverlayText.length() > 0) {
+			alertWasShowing = true;
+
+			// Repaint only when the overlay actually changed. Nothing draws over it
+			// in between any more, so the previous paint is still on the panel.
+			const uint8_t blinkPhase = (uint8_t)((now / ALERT_BLINK_MS) & 1);
+			const bool overlayUnchanged = (activeOverlayText == paintedOverlayText) &&
+			                              (activeOverlayBgColor == paintedOverlayBg) &&
+			                              (blinkPhase == paintedBlinkPhase);
+			// Phase 1 swaps foreground and background, so the alert pulses while
+			// staying readable in both phases.
+			const uint16_t bgNow = blinkPhase ? BLACK : activeOverlayBgColor;
+			const uint16_t fgNow = blinkPhase ? activeOverlayBgColor : activeOverlayTextColor;
+
+	            if (activeOverlayText.length() > 0 && !overlayUnchanged) {
+	                paintedOverlayText = activeOverlayText;
+	                paintedOverlayBg = activeOverlayBgColor;
+	                paintedBlinkPhase = blinkPhase;
+	                pdOverlayPaints++;
+
+	                // Wipe the whole panel before drawing the box. The box is not
+	                // full-screen, and loop() stops refreshing the page underneath
+	                // while an overlay is up — so without this the telemetry drawn on
+	                // the frame the alert arrived stays frozen around it, which reads
+	                // as values leaking through the alert.
+	                gfx->fillScreen(BLACK);
                 // ... (código anterior de contagem de linhas igual) ...
                 int lineCount = 1;
 	                for (int i = 0; i < activeOverlayText.length(); i++) {
@@ -2779,9 +2989,9 @@ public:
                 // --- FIM DO AJUSTE ---
 
                 // Desenha o fundo
-	                gfx->fillRect(alertX, alertY, alertWidth, alertHeight, activeOverlayBgColor);
+	                gfx->fillRect(alertX, alertY, alertWidth, alertHeight, bgNow);
 
-	                gfx->setTextColor(activeOverlayTextColor);
+	                gfx->setTextColor(fgNow);
                 gfx->setTextSize(6); // Mantive grande
 
                 int16_t x1, y1;
@@ -2837,6 +3047,8 @@ public:
 			// Alert just expired - set flag to trigger full redraw in next draw() cycle
 			alertWasShowing = false;
 			needsFullRedraw = true;
+			paintedOverlayText = "";
+			paintedBlinkPhase = 0xFF;
 			prevAlertText = "";  // Clear so next alert with same text will trigger fresh timer
 			}
 		}
