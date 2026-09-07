@@ -2938,7 +2938,12 @@ public:
 
 			// Repaint only when the overlay actually changed. Nothing draws over it
 			// in between any more, so the previous paint is still on the panel.
-			const uint8_t blinkPhase = (uint8_t)((now / ALERT_BLINK_MS) & 1);
+			// Only race alerts pulse. Menu feedback from the MFC and the transient
+			// SimHub popups (BIAS:, TC LEVEL:) share this same overlay path, and
+			// blinking them made the selector flicker while it was being turned —
+			// a confirmation flash is wanted there, not a strobe.
+			const bool blinkThis = (activeOverlayPriority == OVERLAY_SIMHUB_CRITICAL);
+			const uint8_t blinkPhase = blinkThis ? (uint8_t)((now / ALERT_BLINK_MS) & 1) : 0;
 			const bool overlayUnchanged = (activeOverlayText == paintedOverlayText) &&
 			                              (activeOverlayBgColor == paintedOverlayBg) &&
 			                              (blinkPhase == paintedBlinkPhase);
