@@ -33,16 +33,27 @@ SVG_NS = '{http://www.w3.org/2000/svg}'
 
 # SVG filename stem -> (C_IDENTIFIER, [match_strings_for_SimHub_TrackId])
 TRACKS = {
-    'RaceCircuitAmericas':         ('AMERICAS',    ['americas', 'cota']),
-    'RaceCircuitAutodromaDiMonza': ('MONZA',       ['monza']),
-    'RaceCircuitGillesVilleneuve': ('VILLENEUVE',  ['villeneuve', 'montreal']),
-    'RaceCircuitInterlagos2':      ('INTERLAGOS',  ['interlagos']),
-    'RaceCircuitMonaco2':          ('MONACO',      ['monaco']),
-    'RaceCircuitPaulRicard':       ('PAULRICARD',  ['paul_ricard', 'ricard', 'castellet']),
-    'RaceCircuitRedBull2':         ('REDBULL',     ['red_bull', 'spielberg']),
-    'RaceCircuitSepang2':          ('SEPANG',      ['sepang']),
+    # SVG filename stem -> (C identifier, [aliases matched against SimHub's TrackId])
+    #
+    # Aliases exist because every sim names the same circuit differently: Assetto
+    # Corsa ships "ks_barcelona", ACC says "barcelona", iRacing "catalunya". They are
+    # matched by findTrackMap() in SHCustomProtocol.h, which tries an exact match
+    # first, then whole tokens, and only then a substring — so short aliases like
+    # "spa" are safe to list (a plain substring pass would also hit "spain").
+    'RaceCircuitAmericas':         ('AMERICAS',    ['americas', 'cota', 'austin', 'circuit_of_the_americas']),
+    'RaceCircuitAutodromaDiMonza': ('MONZA',       ['monza', 'autodromo_nazionale_monza']),
+    'RaceCircuitCatalunya':        ('CATALUNYA',   ['catalunya', 'barcelona', 'montmelo']),
+    'RaceCircuitGillesVilleneuve': ('VILLENEUVE',  ['villeneuve', 'gilles_villeneuve', 'montreal', 'canada']),
+    'RaceCircuitHockenheim':       ('HOCKENHEIM',  ['hockenheim', 'hockenheimring']),
+    'RaceCircuitInterlagos2':      ('INTERLAGOS',  ['interlagos', 'jose_carlos_pace', 'brazil']),
+    'RaceCircuitMonaco2':          ('MONACO',      ['monaco', 'monte_carlo', 'montecarlo']),
+    'RaceCircuitPaulRicard':       ('PAULRICARD',  ['paul_ricard', 'ricard', 'castellet', 'le_castellet']),
+    'RaceCircuitRedBull2':         ('REDBULL',     ['red_bull_ring', 'red_bull', 'redbull', 'spielberg']),
+    'RaceCircuitSepang2':          ('SEPANG',      ['sepang', 'malaysia']),
+    'RaceCircuitShanghai':         ('SHANGHAI',    ['shanghai', 'china']),
     'RaceCircuitSilverstone':      ('SILVERSTONE', ['silverstone']),
     'RaceCircuitSochiAutodrom2':   ('SOCHI',       ['sochi']),
+    'RaceCircuitSpa':              ('SPA',         ['spa_francorchamps', 'francorchamps', 'spa']),
     'RaceCircuitSuzuka':           ('SUZUKA',      ['suzuka']),
 }
 
@@ -234,7 +245,8 @@ def main():
     for svg_file in sorted(svg_dir.glob('*.svg')):
         stem = svg_file.stem
         if stem not in TRACKS:
-            print(f'  SKIP: {svg_file.name} (no mapping)')
+            print(f'  *** SKIPPED: {svg_file.name} has no entry in TRACKS ***')
+            skipped.append(svg_file.name)
             continue
 
         c_id, aliases = TRACKS[stem]

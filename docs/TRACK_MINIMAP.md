@@ -23,26 +23,51 @@ A **PAGE_MAP** (página 6 do display) exibe o layout real da pista em miniatura 
 
 ## Pistas disponíveis
 
-| Pista | Strings de match (trackId do SimHub) |
+15 circuitos, 39 apelidos. Gerado de `tracks_svg/*.svg` por
+`scripts/convert_tracks.py` — não editar `src/TrackMaps.h` à mão.
+
+| Circuito | Apelidos aceitos |
 |---|---|
-| Circuit of the Americas | `americas`, `cota` |
-| Autodromo di Monza | `monza` |
-| Circuit Gilles Villeneuve | `villeneuve`, `montreal` |
-| Autodromo Interlagos | `interlagos` |
-| Circuit de Monaco | `monaco` |
-| Circuit Paul Ricard | `paul_ricard`, `ricard`, `castellet` |
-| Red Bull Ring | `red_bull`, `spielberg` |
-| Sepang International | `sepang` |
+| Americas | `americas`, `cota`, `austin`, `circuit_of_the_americas` |
+| Monza | `monza`, `autodromo_nazionale_monza` |
+| Catalunya | `catalunya`, `barcelona`, `montmelo` |
+| Villeneuve | `villeneuve`, `gilles_villeneuve`, `montreal`, `canada` |
+| Hockenheim | `hockenheim`, `hockenheimring` |
+| Interlagos | `interlagos`, `jose_carlos_pace`, `brazil` |
+| Monaco | `monaco`, `monte_carlo`, `montecarlo` |
+| Paulricard | `paul_ricard`, `ricard`, `castellet`, `le_castellet` |
+| Redbull | `red_bull_ring`, `red_bull`, `redbull`, `spielberg` |
+| Sepang | `sepang`, `malaysia` |
+| Shanghai | `shanghai`, `china` |
 | Silverstone | `silverstone` |
-| Sochi Autodrom | `sochi` |
+| Sochi | `sochi` |
+| Spa | `spa_francorchamps`, `francorchamps`, `spa` |
 | Suzuka | `suzuka` |
 
-O match é feito por **substring case-insensitive**: se o `trackId` enviado pelo SimHub contém qualquer uma das strings acima, a pista correspondente é usada.
-Exemplo: `"Autodromo_Nazionale_Monza"` → match com `"monza"`.
+**Le Mans, Nürburgring e outros não estão aqui** porque não há SVG deles em
+`tracks_svg/`. Quando o `TrackId` não bate com nenhum apelido, a tela desenha um
+anel genérico com as posições — e agora escreve `NO MAP FOR: <trackId>` em cima,
+para que o nome exato a cadastrar fique visível.
 
-Para pistas fora dessa lista, o oval genérico é exibido automaticamente.
+## Como o nome é reconhecido
 
----
+`findTrackMap()` em `SHCustomProtocol.h` recebe o `TrackId` do SimHub, que varia
+por simulador e por mod para o mesmo circuito (`spa`, `spa_francorchamps`,
+`ks_barcelona`, `monza_1966`). A correspondência é feita em três passes, do mais
+estrito para o mais frouxo:
+
+1. **Exato** — `TrackId` igual ao apelido.
+2. **Palavra inteira** — o apelido aparece delimitado por caracteres não
+   alfanuméricos, então `ks_barcelona` casa com `barcelona`.
+3. **Substring** — só para apelidos com **6 caracteres ou mais**.
+
+O limite de 6 no passe 3 não é arbitrário: sem ele, o apelido `spa` casava com um
+circuito chamado `spain`. Os passes 1 e 2 mantêm apelidos curtos utilizáveis sem
+esse risco.
+
+`scripts/track_match_test.py` exercita isso contra a placa (inclusive os casos
+que **não** devem casar) e responde `map=FOUND` / `map=none` pela porta de
+diagnóstico 10004.
 
 ## Arquitetura
 
