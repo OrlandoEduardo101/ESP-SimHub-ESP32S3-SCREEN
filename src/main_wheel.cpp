@@ -1477,17 +1477,22 @@ const char* ersModeNames[ERS_COUNT] = {
 };
 
 // Virtual buttons for MFC menu items (all IDs must be <= 64 to fit HID descriptor)
-// IDs 60-63: TC2 UP/DN (60/61), FFB UP/DN (62/63); 62/63 also used by SHIFT+TC2 = TC3 function
-// IDs 6/7/8, 38/39, 64: TYRE UP/DN, VOL_A UP/DN, VOL_B UP/DN
-// IMPORTANT: IDs 6/7/8 are physically empty matrix slots (never wired) → safe for virtual use
-// Previous IDs 35/36/37 conflicted with physical Traseiro1/2 and Frontal7 (all <= MATRIX_HID_MAX=37)
-VirtualButtonPulse mfcVirtualButtons[10] = {
+// IMPORTANT: IDs 6/7/8, 15/16, 23/24 and 31/32 are physically empty matrix slots
+// (never wired, see MATRIX_HID_MAX's slot list) → safe for virtual use even though
+// they fall under MATRIX_HID_MAX. Previous IDs 35/36/37 were NOT empty: they
+// conflicted with physical Traseiro1/2 and Frontal7.
+VirtualButtonPulse mfcVirtualButtons[16] = {
     {60, false, 0}, {61, false, 0}, // TC2 UP/DN
-    {62, false, 0}, {63, false, 0}, // FFB UP/DN (shared: SHIFT+TC2 also fires 62/63)
+    {62, false, 0}, {63, false, 0}, // FFB UP/DN
     {64, false, 0}, { 6, false, 0}, // TYRE UP (64) / TYRE DN (6) — was 35, conflicted
     { 7, false, 0}, { 8, false, 0}, // VOL_A UP (7) / VOL_A DN (8) — were 36/37, conflicted
-    {38, false, 0}, {39, false, 0}  // VOL_B UP/DN (no conflict: 38/39 > MATRIX_HID_MAX)
+    {38, false, 0}, {39, false, 0}, // VOL_B UP/DN (no conflict: 38/39 > MATRIX_HID_MAX)
+    {15, false, 0}, {16, false, 0}, // FUEL UP/DN
+    {23, false, 0}, {24, false, 0}, // ERS UP/DN
+    {31, false, 0}, {32, false, 0}  // TC3 UP/DN (SHIFT+TC2) — was 62/63, collided with FFB
 };
+static const uint8_t MFC_VIRTUAL_BUTTON_COUNT =
+    sizeof(mfcVirtualButtons) / sizeof(mfcVirtualButtons[0]);
 
 // Matrix button slots for multimedia (when VOL_SYS active)
 static const uint8_t BUTTON_RADIO = 13;  // Slot 13 = MUTE   (GPB1/GPA4)
@@ -2152,8 +2157,11 @@ void handleMfcRotate(int8_t step) {
             triggerVirtualButton(step > 0 ? 38 : 39);
             sendGamepad();
         } else if (item == MFC_TC2) {
-            // SHIFT+TC2 → TC3 function (62/63); plain → TC2 (60/61)
-            triggerVirtualButton(shiftPressed ? (step > 0 ? 62 : 63) : (step > 0 ? 60 : 61));
+            // SHIFT+TC2 → TC3 (31/32); plain → TC2 (60/61). TC3 used to share
+            // 62/63 with FFB, which left the two indistinguishable to the game:
+            // binding one bound the other. FFB keeps 62/63 so existing bindings
+            // survive; TC3 moved to a pair of empty matrix slots.
+            triggerVirtualButton(shiftPressed ? (step > 0 ? 31 : 32) : (step > 0 ? 60 : 61));
             sendGamepad();
         } else if (item == MFC_FFB) {
             // Virtual buttons 62 (UP) / 63 (DN)
@@ -2164,14 +2172,27 @@ void handleMfcRotate(int8_t step) {
             triggerVirtualButton(step > 0 ? 64 : 6);
             sendGamepad();
         } else if (item == MFC_ERS) {
-            ersMode = (ersMode + 1) % ERS_COUNT;
+            // Wraps in both directions; used to advance on either rotation,
+            // which made the knob feel one-way compared to every other item.
+            int newErs = (int)ersMode + step;
+            if (newErs < 0) newErs = ERS_COUNT - 1;
+            if (newErs >= ERS_COUNT) newErs = 0;
+            ersMode = (uint8_t)newErs;
             saveConfig();
+            // Virtual buttons 23 (UP) / 24 (DN). Without these the item only
+            // ever reached the screen over UART, so there was nothing for a
+            // game to bind — the same gap FUEL had.
+            triggerVirtualButton(step > 0 ? 23 : 24);
+            sendGamepad();
             uartSend("ERS", "MODE", ersModeNames[ersMode]);
         } else if (item == MFC_FUEL) {
             int newFuel = fuelValue + step;
             if (newFuel < 0) newFuel = 0;
             if (newFuel > 100) newFuel = 100;
             fuelValue = newFuel;
+            // Virtual buttons 15 (UP) / 16 (DN) — see ERS above.
+            triggerVirtualButton(step > 0 ? 15 : 16);
+            sendGamepad();
             char buf[8];
             snprintf(buf, sizeof(buf), "%d", fuelValue);
             uartSend("FUEL", "VAL", buf);
@@ -2598,7 +2619,7 @@ void cycleClutchMode() {
 bool lastMfcPressed = false;
 
 void triggerVirtualButton(uint8_t btnId, uint16_t durationMs) {
-    for (uint8_t i = 0; i < 10; i++) {
+    for (uint8_t i = 0; i < MFC_VIRTUAL_BUTTON_COUNT; i++) {
         if (mfcVirtualButtons[i].id == btnId) {
             mfcVirtualButtons[i].active = true;
             mfcVirtualButtons[i].releaseAt = millis() + durationMs;
