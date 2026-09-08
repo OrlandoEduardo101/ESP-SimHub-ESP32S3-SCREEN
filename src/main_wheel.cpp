@@ -1765,10 +1765,19 @@ void sendConsumerControl(uint16_t code) {
 
 void saveConfig() {
     prefs.putUChar("clMode", (uint8_t)clutchCfg.mode);
-    prefs.putUShort("h1min", clutchCfg.hallMinA);
-    prefs.putUShort("h1max", clutchCfg.hallMaxA);
-    prefs.putUShort("h2min", clutchCfg.hallMinB);
-    prefs.putUShort("h2max", clutchCfg.hallMaxB);
+    // Hall bounds are seeded inverted (min=4095, max=0) when a sweep starts and
+    // only converge as the paddles move, so any saveConfig() fired mid-sweep —
+    // nudging the MFC encoder on BITE/BRIGHT/PAGE is enough — used to persist
+    // that half-finished range. loadConfig() then saw max <= min on the next
+    // boot and silently fell back to defaults: the "it forgot my calibration"
+    // symptom. Skip the hall keys while a sweep is in progress; the calibration
+    // handler writes them itself once it has a complete range.
+    if (!calibratingHall) {
+        prefs.putUShort("h1min", clutchCfg.hallMinA);
+        prefs.putUShort("h1max", clutchCfg.hallMaxA);
+        prefs.putUShort("h2min", clutchCfg.hallMinB);
+        prefs.putUShort("h2max", clutchCfg.hallMaxB);
+    }
     prefs.putUChar("bite", clutchCfg.bitePoint);
     prefs.putBool("encBtn", encoderButtonMode);
     prefs.putUChar("ersMode", ersMode);
@@ -2752,39 +2761,56 @@ void handleMfcPress() {
                     clutchCfg.hallMaxB = 0;
                     uartSend("CALIB", "START", "HALL");
                 } else {
-                    bool invalidA = clutchCfg.hallMaxA <= (clutchCfg.hallMinA + 5);
-                    bool invalidB = clutchCfg.hallMaxB <= (clutchCfg.hallMinB + 5);
-                    if (invalidA || invalidB) {
-                        clutchCfg.hallMinA = 0;
-                        clutchCfg.hallMaxA = 4095;
-                        clutchCfg.hallMinB = 0;
-                        clutchCfg.hallMaxB = 4095;
-                        saveConfig();
-                        uartSend("CALIB", "INVALID", "HALL");
-                    } else {
-                        // Apply shrinkage: expand endpoints inward by CLUTCH_CALIB_SHRINK% of span.
-                        // This way the sensor reaches ±127 before hitting the mechanical hard stop,
-                        // compensating for users who don't squeeze the paddle all the way.
+                    // Commit each channel on its own. A channel that never
+                    // moved — paddle untouched, or a sensor that dropped out
+                    // mid-sweep — used to drag the other one down with it and
+                    // reset BOTH to 0-4095, which loadConfig() then discarded
+                    // on the next boot as "too wide". A good calibration of one
+                    // paddle was therefore lost twice over. Now a failed channel
+                    // simply keeps whatever was already stored, and a good one
+                    // is committed regardless of what its neighbour did.
+                    bool okA = clutchCfg.hallMaxA > (clutchCfg.hallMinA + 5);
+                    bool okB = clutchCfg.hallMaxB > (clutchCfg.hallMinB + 5);
+                    uint16_t shrinkA = 0;
+                    uint16_t shrinkB = 0;
+
+                    if (okA) {
+                        // Shrinkage: pull the endpoints inward by
+                        // CLUTCH_CALIB_SHRINK% of span so the axis reaches ±127
+                        // before the mechanical hard stop, compensating for
+                        // users who don't squeeze the paddle all the way.
                         uint16_t spanA = clutchCfg.hallMaxA - clutchCfg.hallMinA;
-                        uint16_t spanB = clutchCfg.hallMaxB - clutchCfg.hallMinB;
-                        uint16_t shrinkA = (spanA * CLUTCH_CALIB_SHRINK) / 100;
-                        uint16_t shrinkB = (spanB * CLUTCH_CALIB_SHRINK) / 100;
+                        shrinkA = (spanA * CLUTCH_CALIB_SHRINK) / 100;
                         clutchCfg.hallMinA = (clutchCfg.hallMinA + shrinkA < clutchCfg.hallMaxA) ? clutchCfg.hallMinA + shrinkA : clutchCfg.hallMinA;
                         clutchCfg.hallMaxA = (clutchCfg.hallMaxA > shrinkA) ? clutchCfg.hallMaxA - shrinkA : clutchCfg.hallMaxA;
+                    } else {
+                        clutchCfg.hallMinA = prefs.getUShort("h1min", 1400);
+                        clutchCfg.hallMaxA = prefs.getUShort("h1max", 2200);
+                    }
+
+                    if (okB) {
+                        uint16_t spanB = clutchCfg.hallMaxB - clutchCfg.hallMinB;
+                        shrinkB = (spanB * CLUTCH_CALIB_SHRINK) / 100;
                         clutchCfg.hallMinB = (clutchCfg.hallMinB + shrinkB < clutchCfg.hallMaxB) ? clutchCfg.hallMinB + shrinkB : clutchCfg.hallMinB;
                         clutchCfg.hallMaxB = (clutchCfg.hallMaxB > shrinkB) ? clutchCfg.hallMaxB - shrinkB : clutchCfg.hallMaxB;
-                        // Drop every filter stage so pre-calibration samples
-                        // can't leak into the first reads under the new bounds
-                        hallResetFilters();
-                        hallLastReportedA = 0;
-                        hallLastReportedB = 0;
-                        saveConfig();
-                        DBGF("[CALIB] Done. A[%u-%u] B[%u-%u] (shrink=%u/%u counts)",
-                            clutchCfg.hallMinA, clutchCfg.hallMaxA,
-                            clutchCfg.hallMinB, clutchCfg.hallMaxB,
-                            shrinkA, shrinkB);
-                        uartSend("CALIB", "DONE", "HALL");
+                    } else {
+                        clutchCfg.hallMinB = prefs.getUShort("h2min", 1400);
+                        clutchCfg.hallMaxB = prefs.getUShort("h2max", 2200);
                     }
+
+                    // Drop every filter stage so pre-calibration samples
+                    // can't leak into the first reads under the new bounds
+                    hallResetFilters();
+                    hallLastReportedA = 0;
+                    hallLastReportedB = 0;
+                    saveConfig();
+                    DBGF("[CALIB] A%s[%u-%u] B%s[%u-%u] (shrink=%u/%u counts)",
+                        okA ? "" : " KEPT", clutchCfg.hallMinA, clutchCfg.hallMaxA,
+                        okB ? "" : " KEPT", clutchCfg.hallMinB, clutchCfg.hallMaxB,
+                        shrinkA, shrinkB);
+                    // The screen only renders START/DONE/INVALID, so a partly
+                    // failed sweep still reports INVALID to get a popup.
+                    uartSend("CALIB", (okA && okB) ? "DONE" : "INVALID", "HALL");
                 }
             } else if (item == MFC_ENC_MODE) {
                 encoderButtonMode = !encoderButtonMode;
