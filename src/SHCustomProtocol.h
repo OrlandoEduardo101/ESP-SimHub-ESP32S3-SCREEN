@@ -206,9 +206,12 @@ private:
 	String prevAlertText = "";  // Track previous alert text to avoid resetting timer on same alert
 	enum OverlayPriority : uint8_t {
 		OVERLAY_NONE = 0,
-		OVERLAY_SIMHUB_POPUP = 1,
-		OVERLAY_UART_POPUP = 2,
-		OVERLAY_SIMHUB_CRITICAL = 3
+		OVERLAY_SIMHUB_POPUP = 1,     // transient SimHub popups (BIAS:, TC LEVEL:)
+		OVERLAY_SIMHUB_CRITICAL = 2,  // ENGINE OFF, YELLOW FLAG, PIT LIMITER, ...
+		OVERLAY_UART_POPUP = 3        // MFC menu feedback — wins while the user is
+		                             // physically operating the selector. Without
+		                             // this, a stuck "ENGINE OFF" (game not open)
+		                             // hid the menu and calibration was blind.
 	};
 	String activeOverlayText = "";
 	uint16_t activeOverlayBgColor = BLACK;
