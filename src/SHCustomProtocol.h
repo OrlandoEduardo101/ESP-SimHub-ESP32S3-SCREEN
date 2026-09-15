@@ -466,6 +466,8 @@ public:
 	// PERF_DIAG: parsed values of a few well-spaced fields. Comparing these with
 	// what SimHub shows proves alignment in one look — a value landing in the
 	// wrong one of these is a field-offset bug, not a rendering bug.
+	String getPrevAlertTextDiag() { return prevAlertText; }
+
 	String perfFieldDump() {
 		return "speed=" + speed + " gear=" + gear + " sessTime=" + sessionTimeLeft +
 		       " flag=" + currentFlag + " pen=" + currentPenalties +
@@ -2807,13 +2809,40 @@ public:
 			alertUpper != "0" &&
 			isKnownAlertText(alertUpper) &&
 			isValidAlertString(alertUpper)) {
-			String alertText = cleanAlertText(alertNormalized);
-			uint16_t bgColor = BLACK;
-			uint16_t textColor = WHITE;
-			setAlertColorsFromText(alertUpper, bgColor, textColor, false);
-			latchOverlay(alertText, bgColor, textColor, ALERT_DURATION_MS, OVERLAY_SIMHUB_CRITICAL);
+			// alertMessage is a level signal — the template re-derives it every frame
+			// the underlying condition holds, not just when it starts. Latching on
+			// every frame is what kept a Full Course Yellow relatched back-to-back for
+			// entire laps (each 3s pulse renewed itself before it could expire, so the
+			// dashboard stayed blocked the whole time) and made AMS2's green flag pop
+			// up again at every marshal post: its raw signal dips to "normal" between
+			// posts, the previous pulse had already expired in that gap, so the next
+			// post looked like a brand new event.
+			//
+			// prevAlertText already existed for exactly this ("avoid resetting timer
+			// on same alert") but was only ever cleared, never compared — the guard
+			// was declared and never wired in. Wiring it in makes this edge-triggered:
+			// latch once when the text changes, then stay quiet for as long as the
+			// exact same text keeps coming back — see the "never reset" note below and
+			// the expiry handler further down for why staying quiet has to survive
+			// both the condition holding for a long time (FCY) and it blinking on and
+			// off (a green light at every marshal post). The LED strip keeps
+			// indicating the ongoing flag colour the whole time regardless — this only
+			// stops the full-screen overlay from re-blocking the panel for a
+			// condition already announced.
+			if (alertUpper != prevAlertText) {
+				String alertText = cleanAlertText(alertNormalized);
+				uint16_t bgColor = BLACK;
+				uint16_t textColor = WHITE;
+				setAlertColorsFromText(alertUpper, bgColor, textColor, false);
+				latchOverlay(alertText, bgColor, textColor, ALERT_DURATION_MS, OVERLAY_SIMHUB_CRITICAL);
+				prevAlertText = alertUpper;
+			}
 			hasCriticalSimhubAlert = true;
 		}
+		// prevAlertText is deliberately never reset to "" anywhere (see the expiry
+		// handler further down for why the obvious place to do that is wrong). It
+		// only ever changes by being overwritten with a genuinely different alert
+		// text above, which is what lets a later, distinct alert announce normally.
 
 		// PRIORIDADE 2: Pop-up temporário do SimHub - mensagens de mudanças menores
 		String simhubPopupNormalized = popupMessage;
@@ -3057,7 +3086,16 @@ public:
 			needsFullRedraw = true;
 			paintedOverlayText = "";
 			paintedBlinkPhase = 0xFF;
-			prevAlertText = "";  // Clear so next alert with same text will trigger fresh timer
+			// prevAlertText is deliberately NOT reset here. This is the second half of
+			// the FCY/AMS2-green fix above: this block runs on every natural expiry —
+			// including the very first pulse of a level-triggered alert that is still
+			// physically true (FCY still yellow, still under the same flag). If this
+			// cleared prevAlertText, the alertMessage block up top would see it as ""
+			// on the next frame and re-latch immediately, giving a fresh 3s pulse —
+			// which repeats every ALERT_DURATION_MS for as long as the condition
+			// holds. That was the actual mechanism behind "FCY blinked for laps": the
+			// comparison added above was already being reset out from under itself
+			// right here, every single expiry, before it could do its job.
 			}
 		}
 	}

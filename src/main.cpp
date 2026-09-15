@@ -398,6 +398,7 @@ static void perfDiagHandle()
 	c.printf("chunks=%lu max_chunk=%lu max_used=%lu\n",
 	         (unsigned long)rawChunks, (unsigned long)rawMaxChunk, (unsigned long)rawMaxUsed);
 	c.println(shCustomProtocol.perfFieldDump());
+	c.print("prevAlertText=["); c.print(shCustomProtocol.getPrevAlertTextDiag()); c.println("]");
 
 	c.flush();
 	c.stop();
