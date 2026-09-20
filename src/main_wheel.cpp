@@ -213,6 +213,7 @@ NimBLEServer* bleServer = nullptr;
 NimBLEHIDDevice* bleHid = nullptr;
 NimBLECharacteristic* bleInputGamepad = nullptr;
 NimBLECharacteristic* bleInputConsumer = nullptr;
+unsigned long bleReportSubsAt = 0;   // when to log subscriptions after connect
 
 // Consumer Control (media keys) collection, appended to customGamepadDescriptor
 // to form the BLE report map. Deliberately NOT added to the USB descriptor: on
@@ -244,6 +245,21 @@ static const uint8_t consumerControlDescriptor[] = {
 bool hidConsumerSend(uint16_t value) {
     if (bleEnabled) {
         if (!bleActive || !bleConnected || !bleInputConsumer) return false;
+        // A BLE host only receives notifications on characteristics it has
+        // subscribed to. Windows caches a bonded device's GATT database, so a
+        // host that paired before the consumer report existed keeps serving
+        // itself the old layout, never subscribes to this characteristic, and
+        // notify() goes nowhere. That presents exactly as "the gamepad works
+        // but media keys do nothing", with no error anywhere — so say it out
+        // loud instead of failing silently.
+        if (bleInputConsumer->getSubscribedCount() == 0) {
+            if (value != 0) {
+                DBG("[BLE] consumer report has no subscriber: the host is using a "
+                    "cached GATT database. Remove this device in Windows "
+                    "Bluetooth settings and pair again.");
+            }
+            return false;
+        }
         uint8_t rpt[2] = { (uint8_t)(value & 0xFF), (uint8_t)(value >> 8) };
         bleInputConsumer->setValue(rpt, sizeof(rpt));
         bleInputConsumer->notify();
@@ -253,9 +269,35 @@ bool hidConsumerSend(uint16_t value) {
                         : (ConsumerControl.release() > 0);
 }
 
+// Log, once per connection, which input reports the host actually subscribed
+// to. gamepad=1 consumer=0 is the signature of a stale GATT cache on the host.
+void bleReportSubscriptions() {
+    if (bleReportSubsAt == 0 || millis() < bleReportSubsAt) return;
+    bleReportSubsAt = 0;
+    if (!bleActive || !bleConnected) return;
+    unsigned gp = bleInputGamepad  ? (unsigned)bleInputGamepad->getSubscribedCount()  : 0u;
+    unsigned cc = bleInputConsumer ? (unsigned)bleInputConsumer->getSubscribedCount() : 0u;
+    DBGF("[BLE] subscribed reports: gamepad=%u consumer=%u", gp, cc);
+    if (gp > 0 && cc == 0) {
+        DBG("[BLE] host subscribed to the gamepad but not the consumer report — "
+            "cached GATT database. Remove the pairing in Windows and pair again.");
+    }
+}
+
+// One consumer key = press, hold, release. Over USB the host polls every 1ms,
+// so a 10-30ms hold is ample. Over BLE the connection interval is commonly
+// 15-30ms and both notifications can land in the same connection event, where
+// the host sees a zero-length press and often nothing at all — hold longer.
+void hidConsumerPulse(uint16_t usageId, uint16_t usbHoldMs) {
+    hidConsumerSend(usageId);
+    delay(bleEnabled ? 60 : usbHoldMs);
+    hidConsumerSend(0);
+}
+
 class BleGamepadServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) override {
         bleConnected = true;
+        bleReportSubsAt = millis() + 3000;  // let the host finish subscribing
         DBG("[BLE] Host connected");
     }
     void onDisconnect(NimBLEServer* pServer) override {
@@ -307,7 +349,10 @@ void bleGamepadInit() {
 
     bleHid = new NimBLEHIDDevice(bleServer);
     bleHid->manufacturer(std::string("SimRacing_DIY"));
-    bleHid->pnp(0x02, 0x303A, 0x8172, 1);
+    // Revision 2: the report map gained the consumer control collection. Hosts
+    // key their cached HID descriptor off this, so bumping it gives Windows a
+    // reason to rebuild rather than reuse what it stored for revision 1.
+    bleHid->pnp(0x02, 0x303A, 0x8172, 2);
     bleHid->hidInfo(0x00, 0x01);
     // Concatenated at runtime rather than written out as one literal, so the
     // gamepad half can never drift from the descriptor USB is using.
@@ -1546,9 +1591,7 @@ static const uint16_t SHIFT_ENC_LATERAL_CC[8] = {
 
 // Send a momentary Consumer Control pulse (press + delay + release)
 void sendShiftCC(uint16_t usageId) {
-    hidConsumerSend(usageId);
-    delay(30);
-    hidConsumerSend(0);
+    hidConsumerPulse(usageId, 30);
 }
 
 // Track SHIFT+button state to handle release properly
@@ -1763,9 +1806,7 @@ void uartRoundtripTask() {
 }
 
 void sendConsumerControl(uint16_t code) {
-    hidConsumerSend(code);
-    delay(10);
-    hidConsumerSend(0);
+    hidConsumerPulse(code, 10);
 }
 
 void saveConfig() {
@@ -3140,6 +3181,7 @@ void loop() {
     // Lightweight operations — always run
     handleMfcPress();
     handleMultimediaButtons();
+    bleReportSubscriptions();
     releaseVirtualButtonPulses();
     updateClutches();
     handleShiftClutchCombo();
