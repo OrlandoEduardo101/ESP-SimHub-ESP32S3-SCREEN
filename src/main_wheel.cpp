@@ -2845,8 +2845,14 @@ void handleMfcPress() {
                     DBGF("[MFC MODE] ENC_MODE=%s (menu toggle)", encoderButtonMode ? "BTN" : "AXIS");
                 }
             } else if (item == MFC_ERS) {
+                // ERS is the only car-function item that also cycles on a short
+                // press, so it needs the virtual button here too — the
+                // adjust-mode rotation path alone left this route silent to the
+                // PC. A press always steps forward, so it reports UP (23).
                 ersMode = (ersMode + 1) % ERS_COUNT;
                 saveConfig();
+                triggerVirtualButton(23);
+                sendGamepad();
                 uartSend("ERS", "MODE", ersModeNames[ersMode]);
             } else if (item == MFC_RESET) {
                 clutchCfg.mode = CLUTCH_DUAL;
