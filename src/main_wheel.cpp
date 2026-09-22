@@ -1755,9 +1755,13 @@ static const uint8_t WT32_MAX_PING_FAILS = 3;  // Disconnect after 3 consecutive
 void handleWt32UartRx() {
     while (ButtonBoxSerial.available()) {
         char c = (char)ButtonBoxSerial.read();
-        if (c == '\r') continue;
 
-        if (c == '\n') {
+        // Terminate on CR or LF. Terminals disagree about what Enter sends —
+        // PlatformIO's monitor defaults to CR — and treating CR as filler meant
+        // a hand-typed command could sit in the buffer forever with nothing to
+        // show for it. With CRLF the second character finds an empty line and
+        // the length guard below drops it.
+        if (c == '\n' || c == '\r') {
             if (wt32RxLine.length() > 0) {
                 DBGF("[UART] RX raw: %s", wt32RxLine.c_str());
                 if (handleTrimCommand(wt32RxLine)) {
