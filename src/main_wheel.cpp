@@ -527,7 +527,23 @@ bool isFivewayDirection(uint8_t buttonNum) {
            buttonNum == FIVEWAY_LEFT || buttonNum == FIVEWAY_RIGHT;
 }
 
+// On-wheel hall trim (SHIFT + short press on CALIB). A bench mode: the 5-way
+// picks which endpoint is being tuned, the MFC knob moves it. The $TRIM UART
+// commands stay available and remain the better tool when a terminal is at
+// hand, since they also print the resulting effective bounds.
+bool trimMode = false;
+uint8_t trimSelChannel = 0;  // 0 = A, 1 = B
+uint8_t trimSelEnd = 0;      // 0 = MIN, 1 = MAX
+// Trim mode takes the 5-way away from the HAT, so forgetting it on would look
+// like the d-pad had died in-game. Drop out on its own after a quiet spell.
+static const unsigned long TRIM_MODE_TIMEOUT_MS = 60000;
+unsigned long trimLastActivityMs = 0;
+
 void updateHatFromMatrix() {
+    // While trimming, the 5-way is the selector — don't also fire directions
+    // at the game.
+    if (trimMode) { hatValue = 0; return; }
+
     bool up    = isButtonPressed(FIVEWAY_UP);
     bool down  = isButtonPressed(FIVEWAY_DOWN);
     bool left  = isButtonPressed(FIVEWAY_LEFT);
@@ -2001,6 +2017,53 @@ static void trimReport() {
          loA, hiA, loB, hiB);
 }
 
+// Which of the four trim values the wheel's knob is pointing at.
+static int8_t* trimSelected() {
+    if (trimSelChannel == 0) return (trimSelEnd == 0) ? &clutchCfg.trimMinA
+                                                      : &clutchCfg.trimMaxA;
+    return (trimSelEnd == 0) ? &clutchCfg.trimMinB : &clutchCfg.trimMaxB;
+}
+
+static const char* trimSelName() {
+    static const char* names[4] = { "A MIN", "A MAX", "B MIN", "B MAX" };
+    return names[(trimSelChannel * 2) + trimSelEnd];
+}
+
+// Feedback for the on-wheel mode. Goes to the screen as an ADJUST popup, which
+// the display firmware already renders, so this needs no change over there.
+static void trimModeReport() {
+    trimLastActivityMs = millis();
+    DBGF("[TRIM] target %s = %d%%", trimSelName(), *trimSelected());
+    char buf[24];
+    snprintf(buf, sizeof(buf), "TRIM %s %+d%%", trimSelName(), *trimSelected());
+    uartSend("MFC", "ADJUST", buf);
+}
+
+// 5-way edge detection while trimming: up/down picks the channel, left/right
+// picks the endpoint. Reading the state rather than hooking the matrix scan
+// keeps this out of the hot path; the edges are what matter, not the rate.
+void handleTrimMode() {
+    static bool prevUp = false, prevDown = false, prevLeft = false, prevRight = false;
+
+    if (trimMode && (millis() - trimLastActivityMs) > TRIM_MODE_TIMEOUT_MS) {
+        trimMode = false;
+        DBG("[TRIM] mode OFF (idle timeout) — 5-way back to HAT");
+        uartSend("MFC", "CONFIRM", "TRIM");
+    }
+
+    bool up    = trimMode && isButtonPressed(FIVEWAY_UP);
+    bool down  = trimMode && isButtonPressed(FIVEWAY_DOWN);
+    bool left  = trimMode && isButtonPressed(FIVEWAY_LEFT);
+    bool right = trimMode && isButtonPressed(FIVEWAY_RIGHT);
+
+    if (up    && !prevUp)    { trimSelChannel = 0; trimModeReport(); }
+    if (down  && !prevDown)  { trimSelChannel = 1; trimModeReport(); }
+    if (left  && !prevLeft)  { trimSelEnd     = 0; trimModeReport(); }
+    if (right && !prevRight) { trimSelEnd     = 1; trimModeReport(); }
+
+    prevUp = up; prevDown = down; prevLeft = left; prevRight = right;
+}
+
 static bool handleTrimCommand(String line) {
     if (!line.startsWith("$TRIM:")) return false;
     String rest = line.substring(6);
@@ -2268,6 +2331,16 @@ void handleEncoderButton(uint8_t idx, int8_t step) {
 void handleMfcRotate(int8_t step) {
     bool shiftPressed = isButtonPressed(BUTTON_SHIFT);
     const char* dir = (step > 0) ? "CW" : "CCW";
+
+    // Trim mode owns the knob outright — no menu navigation, no item adjust.
+    if (trimMode) {
+        int8_t* target = trimSelected();
+        *target = (int8_t)constrain((int)*target + step,
+                                    HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+        saveConfig();
+        trimModeReport();
+        return;
+    }
 
     if (MFC_DEBUG_LOG) {
         DBGF("[MFC ENC1] ROT dir=%s step=%+d shift=%d adjust=%d idx=%d item=%s",
@@ -2888,6 +2961,19 @@ void handleMfcPress() {
             } else if (item == MFC_TYRE) {
                 triggerVirtualButton(64);  // TYRE UP preset
                 sendGamepad();
+            } else if (item == MFC_CALIB) {
+                // Free gesture: CALIB's short-press slot was unused, so the
+                // on-wheel trim costs no menu item and no sticker reprint.
+                trimMode = !trimMode;
+                if (trimMode) {
+                    mfcAdjustMode = false;  // the knob is ours now
+                    DBG("[TRIM] mode ON — 5-way selects, MFC knob adjusts");
+                    trimModeReport();
+                } else {
+                    DBG("[TRIM] mode OFF");
+                    uartSend("MFC", "CONFIRM", "TRIM");
+                    trimReport();
+                }
             }
         }
 
@@ -3321,6 +3407,7 @@ void loop() {
 
     // Lightweight operations — always run
     handleMfcPress();
+    handleTrimMode();
     handleMultimediaButtons();
     bleReportSubscriptions();
     releaseVirtualButtonPulses();
