@@ -1355,7 +1355,21 @@ struct ClutchConfig {
     uint16_t hallMinB;
     uint16_t hallMaxB;
     uint8_t bitePoint; // 0-100
+    // Manual fine trim, in percent of the calibrated span, applied ON TOP of
+    // the bounds above instead of replacing them. Keeping the two layers apart
+    // is the whole point: a recalibration never wipes the tuning, and a retrim
+    // never disturbs the calibration. Positive trimMin raises the rest floor
+    // (a deadzone at rest — the shim trick, in software); positive trimMax
+    // lowers the ceiling so the axis saturates before the mechanical stop.
+    // Negative values push the endpoint outward instead.
+    int8_t trimMinA;
+    int8_t trimMaxA;
+    int8_t trimMinB;
+    int8_t trimMaxB;
 };
+
+static const int8_t HALL_TRIM_MIN_PCT = -25;  // per-endpoint trim limits
+static const int8_t HALL_TRIM_MAX_PCT =  40;
 
 ClutchConfig clutchCfg;
 
@@ -1725,6 +1739,7 @@ void uartSendInt(const char* cat, const char* func, int value) {
 // UART roundtrip test (Wheel <-> WT32)
 // ================================
 String wt32RxLine;
+static bool handleTrimCommand(String line);   // defined below saveConfig()
 uint16_t uartPingSeq = 0;
 uint16_t uartPingPendingSeq = 0;
 unsigned long uartPingSentAtMs = 0;
@@ -1745,7 +1760,9 @@ void handleWt32UartRx() {
         if (c == '\n') {
             if (wt32RxLine.length() > 0) {
                 DBGF("[UART] RX raw: %s", wt32RxLine.c_str());
-                if (wt32RxLine.startsWith("$WT:PONG:")) {
+                if (handleTrimCommand(wt32RxLine)) {
+                    // consumed
+                } else if (wt32RxLine.startsWith("$WT:PONG:")) {
                     String seqStr = wt32RxLine.substring(9);
                     seqStr.trim();
                     uint16_t seq = (uint16_t)seqStr.toInt();
@@ -1825,6 +1842,11 @@ void saveConfig() {
         prefs.putUShort("h2max", clutchCfg.hallMaxB);
     }
     prefs.putUChar("bite", clutchCfg.bitePoint);
+    // Trim is independent of a sweep in progress, so it always persists.
+    prefs.putChar("tAmin", clutchCfg.trimMinA);
+    prefs.putChar("tAmax", clutchCfg.trimMaxA);
+    prefs.putChar("tBmin", clutchCfg.trimMinB);
+    prefs.putChar("tBmax", clutchCfg.trimMaxB);
     prefs.putBool("encBtn", encoderButtonMode);
     prefs.putUChar("ersMode", ersMode);
     prefs.putUChar("fuelVal", (uint8_t)fuelValue);
@@ -1860,6 +1882,14 @@ void loadConfig() {
         clutchCfg.hallMinA, clutchCfg.hallMaxA,
         clutchCfg.hallMinB, clutchCfg.hallMaxB);
     clutchCfg.bitePoint = prefs.getUChar("bite", 60);
+    clutchCfg.trimMinA = prefs.getChar("tAmin", 0);
+    clutchCfg.trimMaxA = prefs.getChar("tAmax", 0);
+    clutchCfg.trimMinB = prefs.getChar("tBmin", 0);
+    clutchCfg.trimMaxB = prefs.getChar("tBmax", 0);
+    clutchCfg.trimMinA = constrain(clutchCfg.trimMinA, HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+    clutchCfg.trimMaxA = constrain(clutchCfg.trimMaxA, HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+    clutchCfg.trimMinB = constrain(clutchCfg.trimMinB, HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+    clutchCfg.trimMaxB = constrain(clutchCfg.trimMaxB, HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
     encoderButtonMode = prefs.getBool("encBtn", false);
     ersMode = prefs.getUChar("ersMode", ERS_BALANCED);
     if (ersMode >= ERS_COUNT) {
@@ -1902,6 +1932,27 @@ void toggleBleMode() {
     DBGF("[BLE] %s", bleEnabled ? "ENABLED" : "DISABLED");
 }
 
+// Compose the calibrated bounds with the manual trim. Calibration owns
+// hallMin/hallMax, trim owns the percentages, and they only meet here.
+void hallEffectiveBounds(uint16_t calMin, uint16_t calMax,
+                         int8_t trimMin, int8_t trimMax,
+                         uint16_t& outMin, uint16_t& outMax) {
+    int32_t span = (int32_t)calMax - (int32_t)calMin;
+    if (span <= 0) { outMin = calMin; outMax = calMax; return; }
+    int32_t lo = (int32_t)calMin + (span * trimMin) / 100;
+    int32_t hi = (int32_t)calMax - (span * trimMax) / 100;
+    lo = constrain(lo, 0, 4095);
+    hi = constrain(hi, 0, 4095);
+    // Whatever was typed, the usable range must never collapse or invert —
+    // mapHallToAxis divides by this span.
+    if (hi < lo + 10) {
+        if (lo + 10 <= 4095) hi = lo + 10;
+        else { hi = 4095; lo = 4085; }
+    }
+    outMin = (uint16_t)lo;
+    outMax = (uint16_t)hi;
+}
+
 int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
     if (maxV <= minV) return 0;
     int32_t span = (int32_t)(maxV - minV);
@@ -1917,6 +1968,83 @@ int8_t mapHallToAxis(uint16_t raw, uint16_t minV, uint16_t maxV) {
     // Map the interior (between the two margins) to -127..127
     int32_t interior = span - restMargin - pressMargin;
     return (int8_t)map(val - restMargin, 0, interior, -127, 127);
+}
+
+// Manual hall trim, driven over the debug UART.
+//
+// Fine tuning is a bench activity: you want an exact number while watching the
+// [HALL] line on this same link, which beats nudging an encoder blind. It also
+// costs no menu slot — the physical MFC sticker lists exactly the 15 items in
+// mfcMenuNames[], so a 16th would mean reprinting it — and it keeps the CALIB
+// gesture, which already carries three meanings, from growing a fourth.
+//
+//   $TRIM:SHOW
+//   $TRIM:RESET
+//   $TRIM:<A|B>:<MIN|MAX>:<percent>
+static void trimReport() {
+    uint16_t loA, hiA, loB, hiB;
+    hallEffectiveBounds(clutchCfg.hallMinA, clutchCfg.hallMaxA,
+                        clutchCfg.trimMinA, clutchCfg.trimMaxA, loA, hiA);
+    hallEffectiveBounds(clutchCfg.hallMinB, clutchCfg.hallMaxB,
+                        clutchCfg.trimMinB, clutchCfg.trimMaxB, loB, hiB);
+    DBGF("[TRIM] A min=%d%% max=%d%% | B min=%d%% max=%d%% (allowed %d..%d)",
+         clutchCfg.trimMinA, clutchCfg.trimMaxA,
+         clutchCfg.trimMinB, clutchCfg.trimMaxB,
+         HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+    DBGF("[TRIM] cal A[%u-%u] B[%u-%u] -> effective A[%u-%u] B[%u-%u]",
+         clutchCfg.hallMinA, clutchCfg.hallMaxA,
+         clutchCfg.hallMinB, clutchCfg.hallMaxB,
+         loA, hiA, loB, hiB);
+}
+
+static bool handleTrimCommand(String line) {
+    if (!line.startsWith("$TRIM:")) return false;
+    String rest = line.substring(6);
+    rest.trim();
+    rest.toUpperCase();
+
+    if (rest == "SHOW") { trimReport(); return true; }
+    if (rest == "RESET") {
+        clutchCfg.trimMinA = 0; clutchCfg.trimMaxA = 0;
+        clutchCfg.trimMinB = 0; clutchCfg.trimMaxB = 0;
+        saveConfig();
+        DBG("[TRIM] cleared");
+        trimReport();
+        return true;
+    }
+
+    int c1 = rest.indexOf(':');
+    int c2 = (c1 >= 0) ? rest.indexOf(':', c1 + 1) : -1;
+    if (c1 < 0 || c2 < 0) {
+        DBG("[TRIM] usage: $TRIM:SHOW | $TRIM:RESET | $TRIM:<A|B>:<MIN|MAX>:<pct>");
+        return true;
+    }
+
+    String ch  = rest.substring(0, c1);
+    String end = rest.substring(c1 + 1, c2);
+    long pct   = rest.substring(c2 + 1).toInt();
+
+    bool isA   = (ch == "A");
+    bool isB   = (ch == "B");
+    bool isMin = (end == "MIN");
+    bool isMax = (end == "MAX");
+    if ((!isA && !isB) || (!isMin && !isMax)) {
+        DBG("[TRIM] usage: $TRIM:<A|B>:<MIN|MAX>:<pct>");
+        return true;
+    }
+    if (pct < HALL_TRIM_MIN_PCT || pct > HALL_TRIM_MAX_PCT) {
+        DBGF("[TRIM] %ld%% out of range (%d..%d)",
+             pct, HALL_TRIM_MIN_PCT, HALL_TRIM_MAX_PCT);
+        return true;
+    }
+
+    if (isA && isMin) clutchCfg.trimMinA = (int8_t)pct;
+    if (isA && isMax) clutchCfg.trimMaxA = (int8_t)pct;
+    if (isB && isMin) clutchCfg.trimMinB = (int8_t)pct;
+    if (isB && isMax) clutchCfg.trimMaxB = (int8_t)pct;
+    saveConfig();
+    trimReport();
+    return true;
 }
 
 // Forward declarations
@@ -2528,11 +2656,18 @@ void updateClutches() {
     uint16_t filtA = (uint16_t)constrain((int32_t)kfA, 0, 4095);
     uint16_t filtB = (uint16_t)constrain((int32_t)kfB, 0, 4095);
 
+    // Bounds the axis actually maps through: calibration composed with trim.
+    uint16_t useMinA, useMaxA, useMinB, useMaxB;
+    hallEffectiveBounds(clutchCfg.hallMinA, clutchCfg.hallMaxA,
+                        clutchCfg.trimMinA, clutchCfg.trimMaxA, useMinA, useMaxA);
+    hallEffectiveBounds(clutchCfg.hallMinB, clutchCfg.hallMaxB,
+                        clutchCfg.trimMinB, clutchCfg.trimMaxB, useMinB, useMaxB);
+
     if (HALL_RAW_DEBUG) {
         if (nowMs - lastHallRawDebugMs >= HALL_RAW_DEBUG_MS) {
             lastHallRawDebugMs = nowMs;
-            int8_t dbgA = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
-            int8_t dbgB = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
+            int8_t dbgA = mapHallToAxis(filtA, useMinA, useMaxA);
+            int8_t dbgB = mapHallToAxis(filtB, useMinB, useMaxB);
             DBGF("[HALL] i A=%u B=%u | m A=%u B=%u | k A=%.0f B=%.0f | ax A=%d B=%d | rj %u/%u | w=%lu",
                 intA, intB, rawA, rawB, kfA, kfB, dbgA, dbgB,
                 kalmanA.rejects, kalmanB.rejects, (unsigned long)hallIntegWindowUs);
@@ -2550,8 +2685,8 @@ void updateClutches() {
     }
 
     // Step 4: Map to -127..127 with endpoint clamp (mapHallToAxis handles it)
-    int8_t a = mapHallToAxis(filtA, clutchCfg.hallMinA, clutchCfg.hallMaxA);
-    int8_t b = mapHallToAxis(filtB, clutchCfg.hallMinB, clutchCfg.hallMaxB);
+    int8_t a = mapHallToAxis(filtA, useMinA, useMaxA);
+    int8_t b = mapHallToAxis(filtB, useMinB, useMaxB);
 
     int8_t outA = a;
     int8_t outB = b;
@@ -2902,6 +3037,8 @@ void handleMfcPress() {
                 clutchCfg.hallMaxA = 4095;
                 clutchCfg.hallMinB = 0;
                 clutchCfg.hallMaxB = 4095;
+                clutchCfg.trimMinA = 0; clutchCfg.trimMaxA = 0;
+                clutchCfg.trimMinB = 0; clutchCfg.trimMaxB = 0;
                 encoderButtonMode = false;
                 ersMode = ERS_BALANCED;
                 fuelValue = 50;
