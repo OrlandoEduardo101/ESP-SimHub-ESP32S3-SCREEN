@@ -35,20 +35,33 @@ function Write-Log($msg) {
     Add-Content -Path $LogPath -Value $line -Encoding utf8
 }
 
-# Win32 1061 (ERROR_SERVICE_CANNOT_ACCEPT_CTRL) means the service is mid
-# transition -- start/stop/pause pending -- and can't take a new control
-# right this instant. It is not a permissions problem (confirmed: SYSTEM has
-# SERVICE_STOP in the service's own ACL) and it is not a recurring restart
-# either (the service has no failure/recovery action configured), just a
-# timing window that clears on its own. Retrying a few times with a short
-# wait is the standard, correct handling for it -- failing on the first
-# attempt, which is what this script originally did, is what actually
-# produced the "cannot be stopped" error the user hit.
+# Win32 1061 (ERROR_SERVICE_CANNOT_ACCEPT_CTRL) turned out to have two
+# different causes here, confirmed by testing each in turn rather than
+# guessing:
+#   - A genuinely transient state-transition window, which a short retry
+#     clears (this is what the retry loop below still handles).
+#   - The service's own control-handling thread wedged solid -- SCM still
+#     reports the service Running/Stoppable, sc.exe query shows nothing
+#     wrong, and yet every graceful Stop-Service attempt fails identically,
+#     for minutes, because the one thread that would process SCM's stop
+#     signal is the same one stuck blocking on a dead network call. No
+#     amount of retrying a graceful stop fixes that -- confirmed live by
+#     force-killing the backing process directly (Stop-Process -Force),
+#     which SCM immediately recognised as Stopped, versus five straight
+#     retries of Stop-Service over several minutes that never once
+#     succeeded on the same hang.
+#
+# So Stop now has a second line of defence: if graceful attempts run out,
+# find the process backing the service (Win32_Service.ProcessId, not the
+# hardcoded exe name -- that survives the vendor renaming the binary) and
+# kill it directly. SCM notices the handle close and marks the service
+# Stopped without needing its cooperation. Start has no such fallback --
+# there is no "force" version of launching a service that failed to start.
 function Invoke-ServiceControlWithRetry {
     param(
         [string]$Name,
         [ValidateSet('Stop', 'Start')][string]$Action,
-        [int]$MaxAttempts = 6,
+        [int]$MaxAttempts = 4,
         [int]$DelaySeconds = 3
     )
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -60,10 +73,31 @@ function Invoke-ServiceControlWithRetry {
             return $true
         } catch {
             Write-Log "  $Action attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
-            if ($attempt -eq $MaxAttempts) { throw }
-            Start-Sleep -Seconds $DelaySeconds
+            if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds $DelaySeconds }
         }
     }
+
+    if ($Action -ne 'Stop') { throw "$Action never succeeded after $MaxAttempts attempts" }
+
+    Write-Log "  graceful Stop exhausted $MaxAttempts attempts -- looking for a wedged process to kill directly"
+    $svcInfo = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+    if (-not $svcInfo -or -not $svcInfo.ProcessId -or $svcInfo.ProcessId -eq 0) {
+        throw "no backing ProcessId found for '$Name' -- can't force-kill what I can't identify"
+    }
+    # NB: don't call this $pid -- that's PowerShell's read-only automatic
+    # variable for the *current* process, and assigning to it throws.
+    $svcProcId = $svcInfo.ProcessId
+    Stop-Process -Id $svcProcId -Force -ErrorAction Stop
+    Write-Log "  force-killed PID $svcProcId"
+
+    for ($i = 1; $i -le 10; $i++) {
+        Start-Sleep -Seconds 1
+        if ((Get-Service -Name $Name).Status -eq 'Stopped') {
+            Write-Log "  service confirmed Stopped after force-kill"
+            return $true
+        }
+    }
+    throw "killed PID $svcProcId but service still isn't reporting Stopped after 10s"
 }
 
 Write-Log '--- resume detected, starting recovery ---'
