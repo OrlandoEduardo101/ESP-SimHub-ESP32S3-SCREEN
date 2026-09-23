@@ -116,6 +116,18 @@ try {
     }
     Write-Log "service stopped"
 
+    # 2) Give the OS a moment to actually release the control-server socket
+    # (port 1231) before restarting. Confirmed live: stopping and starting
+    # back to back, same second, left "Control Server: Error listen on port
+    # 1231" in HW_VSP3s_srv.log -- the service came back Running and the
+    # data bridge itself may well have been fine, but the management GUI
+    # (Port Name/IP/Status all blank, Create/Delete COM greyed out) had
+    # nothing to talk to, because nothing had the control port. A 5s gap
+    # before restarting was enough to avoid it in that same test; the ini
+    # edit below eats a little of that for free, but this is here so the
+    # gap holds even when the ini needs no change and that step is instant.
+    Start-Sleep -Seconds 5
+
     # 3) Fix the ini if it reverted, backing up the copy we are about to
     #    change so a bad edit is recoverable.
     if (-not (Test-Path $IniPath)) {
@@ -138,6 +150,25 @@ try {
     #    redials on its own once something opens COM15.
     Invoke-ServiceControlWithRetry -Name $ServiceName -Action Start
     Write-Log "service started, status=$((Get-Service -Name $ServiceName).Status)"
+
+    # Get-Service saying Running is not the same as the bridge actually
+    # working -- that's exactly what the control-port race above looked
+    # like from here: Running, and every field in the management GUI blank.
+    # Check the one thing that actually proves the control server came up.
+    $ctrlPort = 1231
+    $ctrlUp = $false
+    for ($i = 1; $i -le 5; $i++) {
+        if (Get-NetTCPConnection -LocalPort $ctrlPort -State Listen -ErrorAction SilentlyContinue) {
+            $ctrlUp = $true
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if ($ctrlUp) {
+        Write-Log "control port $ctrlPort confirmed listening"
+    } else {
+        Write-Log "WARNING: control port $ctrlPort is not listening -- the management GUI will show blank fields even though the service reports Running. Restarting the service by hand (with a real gap before Start-Service) has fixed this every time it's been seen."
+    }
 
     # 5) Tray client last: kill any stale instance and relaunch fresh, now
     #    that the service it talks to is up and stable.
