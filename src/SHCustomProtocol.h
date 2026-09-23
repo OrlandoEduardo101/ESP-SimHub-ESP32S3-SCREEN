@@ -2133,374 +2133,219 @@ public:
 	void idle() {
 	}
 
-	// ============================================================
-	// PAGE_499P: Ferrari 499P-inspired dashboard
-	// Layout: 480×272
-	// Delta rendering — static frame drawn once, values only on change
-	// ============================================================
+	// ── PAGE 8 — 499P ───────────────────────────────────────────────
+	// Modelled on the real Ferrari 499P wheel dash: black background, small
+	// grey labels above each value, a big white gear between two thin
+	// vertical bars, temperatures in red, full-width energy bar along the
+	// bottom. Scaled down from the car's own screen to 480x320.
+	//
+	// Layout rule the previous version broke: a label is painted once with
+	// the static frame, and the value under it owns a band that starts
+	// below the label and never reaches into the neighbouring cell. Before,
+	// the gear's clear rect ate the bottom half of the ERS text, the speed's
+	// ate its own "SPEED" label, and the ARB values (size 3 text in 32px
+	// boxes) collided with the position readout and spilled into the column
+	// next door.
 	void draw499PPageContent() {
 		if (!canUseDisplay()) return;
 
-		const int W      = SCREEN_WIDTH;   // 480
-		const int H      = 320;            // physical height FH
-		const int TOP_H  = 40;
-		const int BOT_H  = 46;
-		const int BOT_Y  = H - BOT_H;     // 274
-		const int MID_Y  = TOP_H;          // 40
-		const int MID_H  = BOT_Y - MID_Y; // 234
+		const int W     = SCREEN_WIDTH;   // 480
+		const int H     = 320;
+		const int TOP_H = 42;
+		const int BAR_H = 24;
+		const int BAR_Y = H - BAR_H;      // 296
+		const int MID_Y = TOP_H;          // 42
 
-		// Colours
-		const uint16_t BG_DARK  = RGB565( 10,  10,  10);
-		const uint16_t BG_HDR   = RGB565( 22,  22,  28);
-		const uint16_t BG_BOT   = RGB565( 18,  18,  24);
-		const uint16_t BG_TC    = RGB565( 28,   6,   6);
-		const uint16_t LBL      = RGB565(130, 130, 140);
-		const uint16_t WHT      = WHITE;
-		const uint16_t RD       = RGB565(220,  30,  30);
-		const uint16_t GRN      = RGB565(  0, 200,  80);
-		const uint16_t YLW      = RGB565(230, 210,   0);
-		const uint16_t CYN      = RGB565(  0, 200, 220);
-		const uint16_t MGT      = MAGENTA;
-		const uint16_t SEP      = RGB565( 55,  55,  65);
+		const uint16_t BG  = RGB565(  0,   0,   0);
+		const uint16_t LBL = RGB565(110, 110, 118);
+		const uint16_t WHT = WHITE;
+		const uint16_t RD  = RGB565(235,  45,  35);
+		const uint16_t ORG = RGB565(255, 150,   0);
+		const uint16_t GRN = RGB565(  0, 220,  90);
+		const uint16_t YLW = RGB565(240, 215,   0);
+		const uint16_t CYN = RGB565(  0, 200, 220);
+		const uint16_t MGT = RGB565(230,  60, 220);
+		const uint16_t SEP = RGB565( 40,  40,  46);
+		const uint16_t DIM = RGB565( 18,  18,  20);
 
-		// Column x-positions (total 480px):
-		// TC1[0..49] | SPD[50..189] | GEAR/ERS[190..309] | FUEL[310..429] | TC2[430..479]
-		const int TC_W  = 50;
-		const int SL_X  = TC_W;       const int SL_W = 140;
-		const int CC_X  = SL_X+SL_W;  const int CC_W = 120;
-		const int SR_X  = CC_X+CC_W;  const int SR_W = 120;
-		const int TC2_X = W - TC_W;
-		const int TYRE_Y = MID_Y + 130; // horizontal divider y = 170
-		const int TOP_VAL_Y = 16;
-
-		// ── Static frame (drawn once) ─────────────────────────────
-		if (!p499FrameDrawn) {
-			gfx->fillScreen(BG_DARK);
-
-			// Top bar
-			gfx->fillRect(0, 0, W, TOP_H, BG_HDR);
-			gfx->drawLine(0, TOP_H, W, TOP_H, SEP);
-			gfx->setTextColor(LBL); gfx->setTextSize(1);
-			gfx->setCursor(4,      5); gfx->print("TIME");
-			gfx->setCursor(124,    5); gfx->print("DELTA");
-			gfx->setCursor(W-160,  5); gfx->print("SOC");
-			gfx->setCursor(W-58,   5); gfx->print("FUEL");
-
-			// TC columns
-			gfx->fillRect(0,     MID_Y, TC_W, MID_H, BG_TC);
-			gfx->fillRect(TC2_X, MID_Y, TC_W, MID_H, BG_TC);
-			gfx->drawRect(0,     MID_Y, TC_W, MID_H, RGB565(80,30,30));
-			gfx->drawRect(TC2_X, MID_Y, TC_W, MID_H, RGB565(80,30,30));
-			gfx->setTextColor(LBL); gfx->setTextSize(1);
-			gfx->setCursor(6,        MID_Y+4); gfx->print("TC 1");
-			gfx->setCursor(TC2_X+6, MID_Y+4); gfx->print("TC 2");
-
-			// Column separators
-			gfx->drawLine(SL_X,  MID_Y, SL_X,  BOT_Y, SEP);
-			gfx->drawLine(CC_X,  MID_Y, CC_X,  BOT_Y, SEP);
-			gfx->drawLine(SR_X,  MID_Y, SR_X,  BOT_Y, SEP);
-			gfx->drawLine(TC2_X, MID_Y, TC2_X, BOT_Y, SEP);
-
-			// Left col label
-			gfx->setTextColor(LBL); gfx->setTextSize(1);
-			gfx->setCursor(SL_X+5, MID_Y+4); gfx->print("TC SLIP");
-			gfx->setCursor(SL_X+5, MID_Y+50); gfx->print("SPEED");
-
-			// Centre col labels
-			gfx->setCursor(CC_X+5, MID_Y+4); gfx->print("ERS");
-
-			// Right col labels
-			gfx->setCursor(SR_X+5, MID_Y+4);  gfx->print("EN LAST");
-			gfx->setCursor(SR_X+5, MID_Y+50); gfx->print("TC CL");
-
-			// Horizontal divider (tyre area)
-			gfx->drawLine(SL_X, TYRE_Y, TC2_X, TYRE_Y, SEP);
-
-			// Tyre corner labels
-			int h2 = SL_W/2;
-			gfx->setTextColor(LBL);
-			gfx->setCursor(SL_X+3,    TYRE_Y+4); gfx->print("FL");
-			gfx->setCursor(SL_X+h2+3, TYRE_Y+4); gfx->print("FR");
-			gfx->setCursor(SL_X+3,    TYRE_Y+48); gfx->print("RL");
-			gfx->setCursor(SL_X+h2+3, TYRE_Y+48); gfx->print("RR");
-
-			// Centre lower: ARB labels
-			gfx->setCursor(CC_X+4,  TYRE_Y+4); gfx->print("ARB F");
-			gfx->setCursor(CC_X+44, TYRE_Y+4); gfx->print("LAP");
-			gfx->setCursor(CC_X+88, TYRE_Y+4); gfx->print("ARB R");
-
-			// Right lower: brake temp labels
-			gfx->setCursor(SR_X+3,  TYRE_Y+4); gfx->print("BFL");
-			gfx->setCursor(SR_X+72, TYRE_Y+4); gfx->print("BFR");
-			gfx->setCursor(SR_X+3,  TYRE_Y+48); gfx->print("BRL");
-			gfx->setCursor(SR_X+72, TYRE_Y+48); gfx->print("BRR");
-
-			// Bottom bar
-			gfx->fillRect(0, BOT_Y, W, BOT_H, BG_BOT);
-			gfx->drawLine(0, BOT_Y, W, BOT_Y, SEP);
-			const char* bLbls[] = {"SOC","FUEL LVL","BR BIAS","BRK MIG","REGEN","TC LVL"};
-			int bCW = W/6;
-			for (int i = 0; i < 6; i++) {
-				int cx = i*bCW;
-				if (i>0) gfx->drawLine(cx, BOT_Y, cx, H, SEP);
-				gfx->setTextColor(LBL); gfx->setTextSize(1);
-				gfx->setCursor(cx+3, BOT_Y+10); gfx->print(bLbls[i]);
-			}
-
-			// Cleanup old keys no longer used in this layout.
-			prevData.erase("p_pos");
-			prevData.erase("p_gap");
-			prevData.erase("p_fpl");
-			prevData.erase("p_frl");
-
-			p499FrameDrawn = true;
-		}
-
-		// ── helpers ──────────────────────────────────────────────
 		int16_t bx, by; uint16_t bw, bh;
-		int bCW = W/6;
-		int h2 = SL_W/2;
-		float fuelVal = fuelRemainingLaps.toFloat();
 		int kv = kersLevel.toInt();
 		kv = kv < 0 ? 0 : (kv > 100 ? 100 : kv);
-		auto tyreTempColor = [&](int t) -> uint16_t {
+
+		auto tyreCol = [&](int t) -> uint16_t {
 			if (t > 105) return RD;
-			if (t > 90) return YLW;
-			if (t > 60) return CYN;
+			if (t > 90)  return ORG;
+			if (t > 60)  return CYN;
 			return LBL;
 		};
-		auto brakeTempColor = [&](int t) -> uint16_t {
+		auto brakeCol = [&](int t) -> uint16_t {
 			if (t > 700) return RD;
-			if (t > 500) return YLW;
+			if (t > 500) return ORG;
 			if (t > 200) return WHT;
 			return LBL;
 		};
 
-		// ── Top bar ───────────────────────────────────────────────
-		// Lap time
-		if (prevData["p_lap"] != currentLapTime) {
-			gfx->fillRect(2, 14, 112, 22, BG_HDR);
-			gfx->setTextColor(WHT); gfx->setTextSize(2);
-			gfx->setCursor(4, TOP_VAL_Y); gfx->print(currentLapTime);
-			prevData["p_lap"] = currentLapTime;
-		}
-		// Delta
-		if (prevData["p_dt"] != sessionBestLiveDeltaSeconds) {
-			gfx->fillRect(118, 14, 130, 22, BG_HDR);
-			bool neg = sessionBestLiveDeltaSeconds.indexOf('-') >= 0;
-			gfx->setTextColor(neg ? GRN : RD); gfx->setTextSize(2);
-			gfx->setCursor(120, TOP_VAL_Y); gfx->print(sessionBestLiveDeltaSeconds);
-			prevData["p_dt"] = sessionBestLiveDeltaSeconds;
-		}
-		// SOC
-		String socStr = String(kv) + "%";
-		if (prevData["p_soc"] != socStr) {
-			gfx->fillRect(W - 166, 14, 102, 22, BG_HDR);
-			uint16_t socCol = kv > 50 ? GRN : (kv > 20 ? YLW : RD);
-			gfx->setTextColor(socCol); gfx->setTextSize(2);
-			gfx->setCursor(W - 160, TOP_VAL_Y); gfx->print(socStr);
-			prevData["p_soc"] = socStr;
-		}
-		// Fuel
-		if (prevData["p_fl"] != fuelRemainingLaps) {
-			gfx->fillRect(W - 64, 14, 62, 22, BG_HDR);
-			gfx->setTextColor(fuelVal<3.0f ? RD : WHT); gfx->setTextSize(2);
-			gfx->setCursor(W - 58, TOP_VAL_Y); gfx->print(fuelRemainingLaps);
-			prevData["p_fl"] = fuelRemainingLaps;
+		// One labelled value. The band (x, y, w, vh) belongs to this value
+		// alone: it is cleared and repainted here and nowhere else. Text too
+		// wide for its band shrinks a size instead of spilling over — the
+		// NeoRed fields can return strings of unknown length.
+		auto val = [&](const char* key, int x, int y, int w, int vh,
+		               uint8_t size, uint16_t col, const String& v) {
+			if (prevData[key] == v) return;
+			gfx->fillRect(x, y, w, vh, BG);
+			while (size > 1 && (int)v.length() * 6 * size > w) size--;
+			gfx->setTextColor(col);
+			gfx->setTextSize(size);
+			gfx->setCursor(x, y);
+			gfx->print(v);
+			prevData[key] = v;
+		};
+
+		// ── static frame (labels only, painted once) ────────────────
+		if (!p499FrameDrawn) {
+			gfx->fillScreen(BG);
+			gfx->setTextSize(1);
+			gfx->setTextColor(LBL);
+
+			gfx->setCursor(  6,   4); gfx->print("LAP");
+			gfx->setCursor(176,   4); gfx->print("DELTA");
+			gfx->setCursor(310,   4); gfx->print("FUEL");
+			gfx->setCursor(404,   4); gfx->print("ENERGY");
+			gfx->drawLine(0, TOP_H - 1, W, TOP_H - 1, SEP);
+
+			gfx->setCursor(  6, MID_Y +   4); gfx->print("TC");
+			gfx->setCursor( 82, MID_Y +   4); gfx->print("TC CUT");
+			gfx->setCursor(  6, MID_Y +  50); gfx->print("FL");
+			gfx->setCursor( 82, MID_Y +  50); gfx->print("FR");
+			gfx->setCursor(  6, MID_Y + 108); gfx->print("RL");
+			gfx->setCursor( 82, MID_Y + 108); gfx->print("RR");
+			gfx->setCursor(  6, MID_Y + 166); gfx->print("WEAR F");
+			gfx->setCursor( 82, MID_Y + 166); gfx->print("WEAR R");
+
+			gfx->setCursor(158, MID_Y +   4); gfx->print("MAP");
+			gfx->setCursor(158, MID_Y + 158); gfx->print("POS");
+			gfx->setCursor(240, MID_Y + 158); gfx->print("REGEN");
+			gfx->setCursor(158, MID_Y + 202); gfx->print("BR BIAS");
+			gfx->setCursor(240, MID_Y + 202); gfx->print("BRK MIG");
+
+			gfx->setCursor(334, MID_Y +   4); gfx->print("EN/LAP");
+			gfx->setCursor(416, MID_Y +   4); gfx->print("ABS");
+			gfx->setCursor(334, MID_Y +  50); gfx->print("BFL");
+			gfx->setCursor(410, MID_Y +  50); gfx->print("BFR");
+			gfx->setCursor(334, MID_Y + 108); gfx->print("BRL");
+			gfx->setCursor(410, MID_Y + 108); gfx->print("BRR");
+			gfx->setCursor(334, MID_Y + 166); gfx->print("OIL");
+			gfx->setCursor(410, MID_Y + 166); gfx->print("WATER");
+
+			p499FrameDrawn = true;
 		}
 
-		// ── TC1 (left edge) ──────────────────────────────────────
-		if (prevData["p_tc1"] != tcLevel) {
-			gfx->fillRect(2, MID_Y+20, TC_W-4, MID_H-22, BG_TC);
-			gfx->setTextColor(RD); gfx->setTextSize(3);
-			gfx->getTextBounds(tcLevel, 0, 0, &bx, &by, &bw, &bh);
-			gfx->setCursor((TC_W - bw)/2, MID_Y+24); gfx->print(tcLevel);
-			prevData["p_tc1"] = tcLevel;
-		}
-		// ── TC2 (right edge) ─────────────────────────────────────
-		if (prevData["p_tc2"] != tcCut) {
-			gfx->fillRect(TC2_X+2, MID_Y+20, TC_W-4, MID_H-22, BG_TC);
-			gfx->setTextColor(RD); gfx->setTextSize(3);
-			gfx->getTextBounds(tcCut, 0, 0, &bx, &by, &bw, &bh);
-			gfx->setCursor(TC2_X + (TC_W - bw)/2, MID_Y+24); gfx->print(tcCut);
-			prevData["p_tc2"] = tcCut;
-		}
+		// ── top strip ───────────────────────────────────────────────
+		val("p_lap", 6, 14, 164, 24, 3, WHT, currentLapTime);
+		bool dNeg = sessionBestLiveDeltaSeconds.indexOf('-') >= 0;
+		val("p_dt", 176, 14, 126, 24, 3, dNeg ? GRN : RD, sessionBestLiveDeltaSeconds);
+		val("p_fu", 310, 14,  86, 24, 3,
+		    fuelRemainingLaps.toFloat() < 3.0f ? RD : WHT, fuelRemainingLaps);
+		val("p_soc", 404, 14, 74, 24, 3,
+		    kv > 50 ? GRN : (kv > 20 ? YLW : RD), String(kv) + "%");
 
-		// ── SL (left column): TC SLIP + SPEED ────────────────────
-		if (prevData["p_tcs"] != tcLevel) {
-			gfx->fillRect(SL_X+2, MID_Y+16, SL_W-4, 26, BG_DARK);
-			gfx->setTextColor(WHT); gfx->setTextSize(3);
-			gfx->setCursor(SL_X + SL_W - 40, MID_Y + 18); gfx->print(tcLevel);
-			prevData["p_tcs"] = tcLevel;
-		}
-		if (prevData["p_spd"] != speed) {
-			gfx->fillRect(SL_X+2, MID_Y+48, SL_W-4, TYRE_Y-MID_Y-50, BG_DARK);
-			gfx->setTextColor(WHT); gfx->setTextSize(5);
-			gfx->getTextBounds(speed,0,0,&bx,&by,&bw,&bh);
-			gfx->setCursor(SL_X+(SL_W-bw)/2, MID_Y+62);
-			gfx->print(speed);
-			prevData["p_spd"] = speed;
-		}
+		// ── left column: electronics, tyres, wear ───────────────────
+		val("p_tc",   6, MID_Y +  14, 70, 24, 3, tcActive.toInt() ? ORG : WHT, tcLevel);
+		val("p_tcc", 82, MID_Y +  14, 64, 24, 3, WHT, tcCut);
 
-		// ── GEAR (centre, large) ─────────────────────────────────
+		val("p_pfl",  6, MID_Y +  60, 70, 18, 2, WHT, tyrePressureFrontLeft);
+		val("p_tfl",  6, MID_Y +  80, 70, 16, 2,
+		    tyreCol(tyreTemperatureFrontLeft.toInt()), tyreTemperatureFrontLeft + "C");
+		val("p_pfr", 82, MID_Y +  60, 64, 18, 2, WHT, tyrePressureFrontRight);
+		val("p_tfr", 82, MID_Y +  80, 64, 16, 2,
+		    tyreCol(tyreTemperatureFrontRight.toInt()), tyreTemperatureFrontRight + "C");
+		val("p_prl",  6, MID_Y + 118, 70, 18, 2, WHT, tyrePressureRearLeft);
+		val("p_trl",  6, MID_Y + 138, 70, 16, 2,
+		    tyreCol(tyreTemperatureRearLeft.toInt()), tyreTemperatureRearLeft + "C");
+		val("p_prr", 82, MID_Y + 118, 64, 18, 2, WHT, tyrePressureRearRight);
+		val("p_trr", 82, MID_Y + 138, 64, 16, 2,
+		    tyreCol(tyreTemperatureRearRight.toInt()), tyreTemperatureRearRight + "C");
+
+		val("p_wf",   6, MID_Y + 176, 70, 18, 2, CYN, tyreWearFrontLeft + "%");
+		val("p_wr",  82, MID_Y + 176, 64, 18, 2, CYN, tyreWearRearLeft + "%");
+
+		// ── centre: motor map, gear between the two bars ────────────
+		val("p_map", 158, MID_Y + 14, 80, 18, 2, WHT, ersDeployMode);
+
 		if (prevData["p_gr"] != gear) {
-			gfx->fillRect(CC_X+2, MID_Y+22, CC_W-4, TYRE_Y-MID_Y-24, BG_DARK);
-			gfx->setTextColor(YLW); gfx->setTextSize(7);
-			gfx->getTextBounds(gear,0,0,&bx,&by,&bw,&bh);
-			gfx->setCursor(CC_X+(CC_W-bw)/2, MID_Y+26);
+			gfx->fillRect(190, MID_Y + 44, 80, 68, BG);
+			gfx->setTextColor(WHT);
+			gfx->setTextSize(8);
+			gfx->getTextBounds(gear, 0, 0, &bx, &by, &bw, &bh);
+			gfx->setCursor(190 + (80 - (int)bw) / 2, MID_Y + 46);
 			gfx->print(gear);
 			prevData["p_gr"] = gear;
 		}
 
-		// ── ERS mode (above gear) ────────────────────────────────
-		if (prevData["p_ers"] != ersDeployMode) {
-			gfx->fillRect(CC_X+2, MID_Y+16, CC_W-4, 18, BG_DARK);
-			String em = ersDeployMode; em.toUpperCase();
-			uint16_t ec = WHT;
-			if (em.indexOf("ATTACK")>=0||em.indexOf("HOTLAP")>=0) ec=RD;
-			else if (em.indexOf("QUAL")>=0) ec=MGT;
-			else if (em=="NONE"||em=="--") ec=LBL;
-			gfx->setTextColor(ec); gfx->setTextSize(1);
-			gfx->setCursor(CC_X+5, MID_Y+18); gfx->print(ersDeployMode);
-			prevData["p_ers"] = ersDeployMode;
+		// brake pedal (left bar) and energy (right bar) — both clear of the
+		// gear's band, so neither can wipe the other
+		if (prevData["p_bk"] != brake) {
+			int bkv = brake.toInt();
+			bkv = bkv < 0 ? 0 : (bkv > 100 ? 100 : bkv);
+			const int x0 = 166, y0 = MID_Y + 44, wq = 12, hq = 104;
+			gfx->drawRect(x0, y0, wq, hq, SEP);
+			gfx->fillRect(x0 + 1, y0 + 1, wq - 2, hq - 2, DIM);
+			int fh = (bkv * (hq - 2)) / 100;
+			if (fh > 0) gfx->fillRect(x0 + 1, y0 + hq - 1 - fh, wq - 2, fh, RD);
+			prevData["p_bk"] = brake;
 		}
-
-		// ── KERS vertical bar (right side of centre col) ─────────
 		if (prevData["p_kv"] != kersLevel) {
-			const int bX=CC_X+CC_W-18, bTop=MID_Y+22, bBarW=12, bBarH=TYRE_Y-bTop-4;
-			uint16_t kc = kv>50 ? GRN : (kv>20 ? YLW : RD);
-			int fillH = (kv*(bBarH-2))/100;
-			gfx->drawRect(bX, bTop, bBarW, bBarH, LBL);
-			gfx->fillRect(bX+1, bTop+1, bBarW-2, bBarH-2, BG_DARK);
-			if (fillH>0) gfx->fillRect(bX+1, bTop+bBarH-1-fillH, bBarW-2, fillH, kc);
+			const int x0 = 302, y0 = MID_Y + 44, wq = 12, hq = 104;
+			gfx->drawRect(x0, y0, wq, hq, SEP);
+			gfx->fillRect(x0 + 1, y0 + 1, wq - 2, hq - 2, DIM);
+			int fh = (kv * (hq - 2)) / 100;
+			if (fh > 0) gfx->fillRect(x0 + 1, y0 + hq - 1 - fh, wq - 2, fh,
+			                          kv > 50 ? GRN : (kv > 20 ? YLW : RD));
 			prevData["p_kv"] = kersLevel;
 		}
 
-		// ── SR (right column): EN LAST + TC CL ───────────────────
-		if (prevData["p_enl"] != fuelLitersPerLap) {
-			gfx->fillRect(SR_X+2, MID_Y+14, SR_W-4, 30, BG_DARK);
-			gfx->setTextColor(WHT); gfx->setTextSize(3);
-			gfx->setCursor(SR_X+5, MID_Y+16); gfx->print(fuelLitersPerLap);
-			prevData["p_enl"] = fuelLitersPerLap;
-		}
-		if (prevData["p_tcc"] != tcCut) {
-			gfx->fillRect(SR_X+2, MID_Y+58, SR_W-4, 30, BG_DARK);
-			int tcc = tcCut.toInt();
-			gfx->setTextColor(tcc > 0 ? RD : WHT); gfx->setTextSize(3);
-			gfx->setCursor(SR_X+5, MID_Y+60); gfx->print(tcCut);
-			prevData["p_tcc"] = tcCut;
-		}
+		val("p_pos", 158, MID_Y + 168, 76, 24, 3, YLW,
+		    position.length() ? ("P" + position) : "--");
+		val("p_rgn", 240, MID_Y + 168, 84, 24, 3,
+		    regenLevel == "--" ? LBL : GRN, regenLevel);
+		val("p_bb",  158, MID_Y + 212, 76, 18, 2, MGT, brakeBias);
+		val("p_bm",  240, MID_Y + 212, 84, 18, 2,
+		    brkMigration == "--" ? LBL : WHT, brkMigration);
 
-		// ── Tyre pressures + temps ───────────────────────────────
-		struct { int cx; int cy; const String* p; const String* t; const char* k; } tyres[4] = {
-			{SL_X+3,    TYRE_Y+14, &tyrePressureFrontLeft,  &tyreTemperatureFrontLeft,  "p_tfl"},
-			{SL_X+h2+3, TYRE_Y+14, &tyrePressureFrontRight, &tyreTemperatureFrontRight, "p_tfr"},
-			{SL_X+3,    TYRE_Y+58, &tyrePressureRearLeft,   &tyreTemperatureRearLeft,   "p_trl"},
-			{SL_X+h2+3, TYRE_Y+58, &tyrePressureRearRight,  &tyreTemperatureRearRight,  "p_trr"},
-		};
-		for (auto& tr : tyres) {
-			String pv = *tr.p + "|" + *tr.t;
-			if (prevData[tr.k] != pv) {
-				gfx->fillRect(tr.cx, tr.cy, h2-4, 32, BG_DARK);
-				gfx->setTextColor(CYN); gfx->setTextSize(2);
-				gfx->setCursor(tr.cx, tr.cy); gfx->print(*tr.p);
-				gfx->setTextColor(tyreTempColor(tr.t->toInt())); gfx->setTextSize(1);
-				gfx->setCursor(tr.cx, tr.cy+20); gfx->print(*tr.t+"C");
-				prevData[tr.k] = pv;
-			}
-		}
+		// ── right column: energy per lap, brakes, fluids ────────────
+		val("p_enl", 334, MID_Y +  14, 76, 24, 3, WHT, fuelLitersPerLap);
+		val("p_abs", 416, MID_Y +  14, 58, 24, 3,
+		    absActive.toInt() ? ORG : WHT, absLevel);
 
-		// ── ARB F / LAP / ARB R ──────────────────────────────────
-		String arbFrontDisp = arbFront.length() > 0 ? arbFront : "--";
-		if (prevData["p_arbf"] != arbFrontDisp) {
-			gfx->fillRect(CC_X+2, TYRE_Y+20, 32, 18, BG_DARK);
-			gfx->setTextColor(arbFront.length() > 0 ? WHT : LBL); gfx->setTextSize(3);
-			gfx->setCursor(CC_X+4, TYRE_Y+20); gfx->print(arbFrontDisp);
-			prevData["p_arbf"] = arbFrontDisp;
-		}
-		String arbRearDisp = arbRear.length() > 0 ? arbRear : "--";
-		if (prevData["p_arbr"] != arbRearDisp) {
-			gfx->fillRect(CC_X+86, TYRE_Y+20, 32, 18, BG_DARK);
-			gfx->setTextColor(arbRear.length() > 0 ? WHT : LBL); gfx->setTextSize(3);
-			gfx->setCursor(CC_X+88, TYRE_Y+20); gfx->print(arbRearDisp);
-			prevData["p_arbr"] = arbRearDisp;
-		}
-		String posDisplay = position.length() > 0 ? position : "--";
-		String posStr = "P" + posDisplay;
-		if (prevData["p_lap_big"] != posStr) {
-			gfx->fillRect(CC_X+34, TYRE_Y+12, 52, 46, BG_DARK);
-			gfx->setTextColor(position.length() > 0 ? YLW : WHT); gfx->setTextSize(4);
-			gfx->getTextBounds(posStr,0,0,&bx,&by,&bw,&bh);
-			gfx->setCursor(CC_X + (CC_W - bw) / 2, TYRE_Y + 12); gfx->print(posStr);
-			prevData["p_lap_big"] = posStr;
-		}
+		val("p_bfl", 334, MID_Y +  60, 70, 18, 2,
+		    brakeCol(brakeTemperatureFrontLeft.toInt()),  brakeTemperatureFrontLeft);
+		val("p_bfr", 410, MID_Y +  60, 64, 18, 2,
+		    brakeCol(brakeTemperatureFrontRight.toInt()), brakeTemperatureFrontRight);
+		val("p_brl", 334, MID_Y + 118, 70, 18, 2,
+		    brakeCol(brakeTemperatureRearLeft.toInt()),   brakeTemperatureRearLeft);
+		val("p_brr", 410, MID_Y + 118, 64, 18, 2,
+		    brakeCol(brakeTemperatureRearRight.toInt()),  brakeTemperatureRearRight);
 
-		// ── Brake temps ──────────────────────────────────────────
-		struct { int cx; int cy; const String* v; const char* k; } brkTemps[4] = {
-			{SR_X+3,  TYRE_Y+14, &brakeTemperatureFrontLeft,  "p_bfl"},
-			{SR_X+72, TYRE_Y+14, &brakeTemperatureFrontRight, "p_bfr"},
-			{SR_X+3,  TYRE_Y+58, &brakeTemperatureRearLeft,   "p_brl"},
-			{SR_X+72, TYRE_Y+58, &brakeTemperatureRearRight,  "p_brr"},
-		};
-		for (auto& bt : brkTemps) {
-			if (prevData[bt.k] != *bt.v) {
-				gfx->fillRect(bt.cx, bt.cy, 64, 22, BG_DARK);
-				gfx->setTextColor(brakeTempColor(bt.v->toInt())); gfx->setTextSize(2);
-				gfx->setCursor(bt.cx, bt.cy); gfx->print(*bt.v);
-				prevData[bt.k] = *bt.v;
-			}
-		}
-		// ── Tyre wear FL/FR ───────────────────────────────────────
-		if (prevData["p_wr"] != tyreWearFrontLeft+"|"+tyreWearFrontRight) {
-			gfx->fillRect(SL_X+2, TYRE_Y+92, SL_W-4, 10, BG_DARK);
-			gfx->setTextSize(1);
-			gfx->setCursor(SL_X+3, TYRE_Y+92);
-			gfx->setTextColor(LBL); gfx->print("WR:");
-			gfx->setTextColor(CYN); gfx->print(tyreWearFrontLeft+"%");
-			gfx->setCursor(SL_X+h2+3, TYRE_Y+92);
-			gfx->setTextColor(LBL); gfx->print("WR:");
-			gfx->setTextColor(CYN); gfx->print(tyreWearFrontRight+"%");
-			prevData["p_wr"] = tyreWearFrontLeft+"|"+tyreWearFrontRight;
-		}
-		// ── Oil / Water temp ──────────────────────────────────────
-		if (prevData["p_therm"] != oilTemperature+"|"+waterTemperature) {
-			gfx->fillRect(SR_X+2, TYRE_Y+82, SR_W-4, 12, BG_DARK);
-			gfx->setTextSize(1);
-			gfx->setCursor(SR_X+3, TYRE_Y+84);
-			gfx->setTextColor(LBL); gfx->print("OL:");
-			gfx->setTextColor(YLW); gfx->print(oilTemperature);
-			gfx->setCursor(SR_X+63, TYRE_Y+84);
-			gfx->setTextColor(LBL); gfx->print("HW:");
-			gfx->setTextColor(CYN); gfx->print(waterTemperature);
-			prevData["p_therm"] = oilTemperature+"|"+waterTemperature;
-		}
+		val("p_oil", 334, MID_Y + 176, 70, 18, 2, YLW, oilTemperature);
+		val("p_wat", 410, MID_Y + 176, 64, 18, 2, CYN, waterTemperature);
 
-		// ── Bottom energy bar (Virtual Energy / SoC) ─────────────
-		if (prevData["p_eb"] != kersLevel) {
-			gfx->drawRect(0, BOT_Y, W, 6, LBL);
-			gfx->fillRect(1, BOT_Y+1, W-2, 4, BG_DARK);
-			int fillW = (kv * (W-2)) / 100;
-			uint16_t eCol = kv < 30 ? RD : (kv < 60 ? YLW : GRN);
-			if (fillW > 0) gfx->fillRect(1, BOT_Y+1, fillW, 4, eCol);
-			prevData["p_eb"] = kersLevel;
-		}
-
-		// ── Bottom bar values ─────────────────────────────────────
-		// REGEN used to reuse rearBrakeBias as a placeholder (same number as BR BIAS
-		// one column over — that's why it looked frozen). regenLevel is the real value now.
-		String bVals[6] = {String(kv) + "%", fuelRemainingLaps, brakeBias, brkMigration, regenLevel, tcLevel};
-		uint16_t socCol = kv > 50 ? GRN : (kv > 20 ? YLW : RD);
-		uint16_t bClrs[6] = {socCol, fuelVal < 3.0f ? RD : WHT, MGT, WHT, CYN, YLW};
-		const char* bKeys[6] = {"p_b0","p_b1","p_b2","p_b3","p_b4","p_b5"};
-		for (int i = 0; i < 6; i++) {
-			if (prevData[bKeys[i]] != bVals[i]) {
-				int cx = i*bCW;
-				gfx->fillRect(cx+1, BOT_Y+24, bCW-2, BOT_H-26, BG_BOT);
-				uint16_t vc = (bVals[i]=="--"||bVals[i]=="None") ? LBL : bClrs[i];
-				gfx->setTextColor(vc); gfx->setTextSize(2);
-				gfx->setCursor(cx+3, BOT_Y+24); gfx->print(bVals[i]);
-				prevData[bKeys[i]] = bVals[i];
-			}
+		// ── bottom energy bar (red → yellow → green as it fills) ────
+		String barKey = String(kv);
+		if (prevData["p_bar"] != barKey) {
+			const int y0 = BAR_Y + 4, h0 = 16, inner = W - 4;
+			gfx->drawRect(0, y0 - 2, W, h0 + 4, SEP);
+			int fillW = (kv * inner) / 100;
+			int z30 = inner * 30 / 100, z60 = inner * 60 / 100;
+			auto zone = [&](int a, int b, uint16_t c) {
+				int e = b < fillW ? b : fillW;
+				if (e > a) gfx->fillRect(2 + a, y0, e - a, h0, c);
+			};
+			zone(0,   z30,   RD);
+			zone(z30, z60,   YLW);
+			zone(z60, inner, GRN);
+			if (fillW < inner)
+				gfx->fillRect(2 + fillW, y0, inner - fillW, h0, DIM);
+			prevData["p_bar"] = barKey;
 		}
 	}
 
