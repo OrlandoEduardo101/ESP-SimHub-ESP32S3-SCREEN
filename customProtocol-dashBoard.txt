@@ -131,7 +131,7 @@ if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
 
 /* [60] BATERIA HÍBRIDA/KERS (0-100%) - Barra de energia */
-format(isnull([DataCorePlugin.GameData.NewData.KersLevel], [LMU_NeoRedPlugin.PitMenu.Virtual_Energy]), '0') + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.KersLevel], isnull([DataCorePlugin.GameRawData.PlayerNativeTelemetry.mVirtualEnergy], 0) * 100), '0') + ';' +
 
 /* [61] PRESSÃO TURBO (Bar) - Ex: 1.2 */
 format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0') + ';' +
@@ -267,7 +267,7 @@ format([RoadTemperature], '0') + ';' +
 if([CarSettings_CurrentDisplayedRPMPercent] >= 95, 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
-format(isnull([DataCorePlugin.GameData.NewData.KersLevel], [LMU_NeoRedPlugin.PitMenu.Virtual_Energy]), '0') + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.KersLevel], isnull([DataCorePlugin.GameRawData.PlayerNativeTelemetry.mVirtualEnergy], 0) * 100), '0') + ';' +
 format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0') + ';' +
 isnull(isnull([GameRawData.Graphics.ErsDeployMode], [GameRawData.m_ersDeployMode]), isnull([LMU_NeoRedPlugin.Extended.VM_ELECTRIC_MOTOR_MAP], 'None')) + ';' +
 isnull([ARBFront], '--') + ';' +
