@@ -256,6 +256,7 @@ private:
 	String aheadTrackPosition = "0.000";    // [69] Posição carro da frente
 	String behindTrackPosition = "0.000";   // [70] Posição carro de trás
 	String trackId = "Unknown";             // [71] Nome/ID da pista
+	String regenLevel = "--";               // [72] Regen level (LMU Hypercar via NeoRed; "--" nos demais
 
 	// Temperatura pneus (índices 15-18) - promoted from local vars
 	String tyreTemperatureFrontLeft = "0";
@@ -868,7 +869,8 @@ public:
 		trackPositionPercent = FlowSerialReadStringUntil(';');
 		aheadTrackPosition = FlowSerialReadStringUntil(';');
 		behindTrackPosition = FlowSerialReadStringUntil(';');
-		trackId = FlowSerialReadStringUntil(';');  // Último campo (índice 71)
+		trackId = FlowSerialReadStringUntil(';');
+		regenLevel = FlowSerialReadStringUntil(';');  // Último campo (índice 72)
 		trackId.trim();
 
 		// Validate brakeBias (should be between 0-100)
@@ -2484,7 +2486,9 @@ public:
 		}
 
 		// ── Bottom bar values ─────────────────────────────────────
-		String bVals[6] = {String(kv) + "%", fuelRemainingLaps, brakeBias, brkMigration, rearBrakeBias, tcLevel};
+		// REGEN used to reuse rearBrakeBias as a placeholder (same number as BR BIAS
+		// one column over — that's why it looked frozen). regenLevel is the real value now.
+		String bVals[6] = {String(kv) + "%", fuelRemainingLaps, brakeBias, brkMigration, regenLevel, tcLevel};
 		uint16_t socCol = kv > 50 ? GRN : (kv > 20 ? YLW : RD);
 		uint16_t bClrs[6] = {socCol, fuelVal < 3.0f ? RD : WHT, MGT, WHT, CYN, YLW};
 		const char* bKeys[6] = {"p_b0","p_b1","p_b2","p_b3","p_b4","p_b5"};

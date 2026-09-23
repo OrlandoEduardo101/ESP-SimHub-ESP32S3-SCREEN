@@ -57,7 +57,7 @@ format([Brake], '0') + ';' +                                        /* [31] Peda
 [OpponentsCount] + ';' +                                            /* [33] Total Pilotos */
 isnull(format([PersistantTrackerPlugin.DriverAhead_00_Gap], '0.0'), '--') + ';' + /* [34] Gap Frente */
 isnull(format([PersistantTrackerPlugin.DriverBehind_00_Gap], '0.0'), '--') + ';' + /* [35] Gap Atrás */
-format([DataCorePlugin.Computed.Fuel_RemainingLaps], '0.0') + ';' + /* [36] Combustível (Voltas) */
+format(isnull([DataCorePlugin.Computed.Fuel_RemainingLaps], [LMU_NeoRedPlugin.Energy.VE.Computed_RemainLaps]), '0.0') + ';' + /* [36] Combustível (Voltas) */
 format([DataCorePlugin.Computed.Fuel_LitersPerLap], '0.00') + ';' + /* [37] Combustível (L/Volta) */
 format([SessionTimeLeft], 'hh\\:mm\\:ss') + ';' +                   /* [38] Tempo Restante Sessão */
 /* [39] Bandeira (Texto) - detecta via GameRawData.Graphics.Flag */
@@ -131,7 +131,7 @@ if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
 
 /* [60] BATERIA HÍBRIDA/KERS (0-100%) - Barra de energia */
-format([DataCorePlugin.GameData.NewData.KersLevel], '0') + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.KersLevel], [LMU_NeoRedPlugin.PitMenu.Virtual_Energy]), '0') + ';' +
 
 /* [61] PRESSÃO TURBO (Bar) - Ex: 1.2 */
 format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0') + ';' +
@@ -140,7 +140,7 @@ format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0') + ';' +
    BLOCO 9: DADOS 499P (Índices 62-67)
    ========================================== */
 /* [62] ERS Deploy Mode - Modo de deploy de energia (ACC: ErsDeployMode, outros: fallback) */
-isnull(isnull([GameRawData.Graphics.ErsDeployMode], [GameRawData.m_ersDeployMode]), 'None') + ';' +
+isnull(isnull([GameRawData.Graphics.ErsDeployMode], [GameRawData.m_ersDeployMode]), isnull([LMU_NeoRedPlugin.Extended.VM_ELECTRIC_MOTOR_MAP], 'None')) + ';' +
 
 /* [63] ARB Front - Anti-Roll Bar Dianteiro */
 isnull([ARBFront], '--') + ';' +
@@ -149,7 +149,7 @@ isnull([ARBFront], '--') + ';' +
 isnull([ARBRear], '--') + ';' +
 
 /* [65] BRK MIG - Brake Migration (Migração de frenagem) */
-isnull([dcBrakeBiasMigration], '--') + ';' +
+isnull([dcBrakeBiasMigration], isnull([LMU_NeoRedPlugin.Extended.VM_BRAKE_MIGRATION], '--')) + ';' +
 
 /* [66] H WIND - Velocidade do Vento (km/h) */
 isnull(format([WindSpeed], '0'), '0') + ';' +
@@ -170,12 +170,17 @@ format(isnull([PersistantTrackerPlugin.DriverAhead_00_TrackPositionPercent], 0),
 format(isnull([PersistantTrackerPlugin.DriverBehind_00_TrackPositionPercent], 0), '0.000') + ';' +
 
 /* [71] ID/Nome da pista (ex: "monza", "spa", "interlagos") */
-isnull([DataCorePlugin.GameData.NewData.TrackId], 'Unknown') + ';'
+isnull([DataCorePlugin.GameData.NewData.TrackId], 'Unknown') + ';' +
 
-// IMPORTANTE: O trailing ';' após o campo 71 é ESSENCIAL!
-// Sem ele, o ESP32 faz timeout de 400ms por frame no último FlowSerialReadStringUntil(';').
+/* [72] Regen level (LMU Hypercar via NeoRed; '--' em carros/jogos sem regen) */
+isnull([LMU_NeoRedPlugin.Extended.VM_REGEN_LEVEL], '--') + ';' + '~'
 
-// raw data result example:0;1;24;95;2000;00:00.000;00:00.000;00:00.000;0.000;0.00;False;24.6;24.6;25.6;25.6;80;80;80;80;21;21;21;21;0;0;6;0;0;0;0;62.0;100;13;27;0.0;0.0;0.0;0.00;04:01:16;None;0;0;NORMAL;;24;0;0;0;92;92;92;92;;;;21;28;0;0;0;;None;--;--;--;0;0.0;0.000;0.000;0.000;Unknown;
+// IMPORTANTE: o modo raw (porta 10002) espera o frame terminado em '~' — sem
+// ele o firmware nunca sabe onde o frame acaba e fica esperando o resto.
+// (No modo ARQ / porta 10001 o '~' não faz diferença: o enquadramento ali é
+// por pacote, não por terminador, então ele só é ecoado como um byte normal.)
+
+// raw data result example:0;1;24;95;2000;00:00.000;00:00.000;00:00.000;0.000;0.00;False;24.6;24.6;25.6;25.6;80;80;80;80;21;21;21;21;0;0;6;0;0;0;0;62.0;100;13;27;0.0;0.0;0.0;0.00;04:01:16;None;0;0;NORMAL;;24;0;0;0;92;92;92;92;;;;21;28;0;0;0;;None;--;--;--;0;0.0;0.000;0.000;0.000;Unknown;--;~
 
 
 /*
@@ -217,7 +222,7 @@ format([Brake], '0') + ';' +
 [OpponentsCount] + ';' +
 isnull(format([PersistantTrackerPlugin.DriverAhead_00_Gap], '0.0'), '--') + ';' +
 isnull(format([PersistantTrackerPlugin.DriverBehind_00_Gap], '0.0'), '--') + ';' +
-format([DataCorePlugin.Computed.Fuel_RemainingLaps], '0.0') + ';' +
+format(isnull([DataCorePlugin.Computed.Fuel_RemainingLaps], [LMU_NeoRedPlugin.Energy.VE.Computed_RemainLaps]), '0.0') + ';' +
 format([DataCorePlugin.Computed.Fuel_LitersPerLap], '0.00') + ';' +
 format([SessionTimeLeft], 'hh\\:mm\\:ss') + ';' +
 if([DataCorePlugin.GameData.NewData.Flag_Checkered]>0,'Checkered',
@@ -262,17 +267,18 @@ format([RoadTemperature], '0') + ';' +
 if([CarSettings_CurrentDisplayedRPMPercent] >= 95, 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSAvailable], 1, 0) + ';' +
 if([DataCorePlugin.GameData.NewData.DRSActive], 1, 0) + ';' +
-format([DataCorePlugin.GameData.NewData.KersLevel], '0') + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.KersLevel], [LMU_NeoRedPlugin.PitMenu.Virtual_Energy]), '0') + ';' +
 format([DataCorePlugin.GameData.NewData.TurboBoost], '0.0') + ';' +
-isnull(isnull([GameRawData.Graphics.ErsDeployMode], [GameRawData.m_ersDeployMode]), 'None') + ';' +
+isnull(isnull([GameRawData.Graphics.ErsDeployMode], [GameRawData.m_ersDeployMode]), isnull([LMU_NeoRedPlugin.Extended.VM_ELECTRIC_MOTOR_MAP], 'None')) + ';' +
 isnull([ARBFront], '--') + ';' +
 isnull([ARBRear], '--') + ';' +
-isnull([dcBrakeBiasMigration], '--') + ';' +
+isnull([dcBrakeBiasMigration], isnull([LMU_NeoRedPlugin.Extended.VM_BRAKE_MIGRATION], '--')) + ';' +
 isnull(format([WindSpeed], '0'), '0') + ';' +
 isnull(format(100 - [BrakeBias], '0.0'), '0.0') + ';' +
 format(isnull([DataCorePlugin.GameData.NewData.TrackPositionPercent], 0), '0.000') + ';' +
 format(isnull([PersistantTrackerPlugin.DriverAhead_00_TrackPositionPercent], 0), '0.000') + ';' +
 format(isnull([PersistantTrackerPlugin.DriverBehind_00_TrackPositionPercent], 0), '0.000') + ';' +
-isnull([DataCorePlugin.GameData.NewData.TrackId], 'Unknown') + ';'
+isnull([DataCorePlugin.GameData.NewData.TrackId], 'Unknown') + ';' +
+isnull([LMU_NeoRedPlugin.Extended.VM_REGEN_LEVEL], '--') + ';' + '~'
 
 */
