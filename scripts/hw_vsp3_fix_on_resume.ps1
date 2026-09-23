@@ -35,28 +35,50 @@ function Write-Log($msg) {
     Add-Content -Path $LogPath -Value $line -Encoding utf8
 }
 
+# Win32 1061 (ERROR_SERVICE_CANNOT_ACCEPT_CTRL) means the service is mid
+# transition -- start/stop/pause pending -- and can't take a new control
+# right this instant. It is not a permissions problem (confirmed: SYSTEM has
+# SERVICE_STOP in the service's own ACL) and it is not a recurring restart
+# either (the service has no failure/recovery action configured), just a
+# timing window that clears on its own. Retrying a few times with a short
+# wait is the standard, correct handling for it -- failing on the first
+# attempt, which is what this script originally did, is what actually
+# produced the "cannot be stopped" error the user hit.
+function Invoke-ServiceControlWithRetry {
+    param(
+        [string]$Name,
+        [ValidateSet('Stop', 'Start')][string]$Action,
+        [int]$MaxAttempts = 6,
+        [int]$DelaySeconds = 3
+    )
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            if ($Action -eq 'Stop') { Stop-Service -Name $Name -Force -ErrorAction Stop }
+            else { Start-Service -Name $Name -ErrorAction Stop }
+            $target = if ($Action -eq 'Stop') { 'Stopped' } else { 'Running' }
+            (Get-Service -Name $Name).WaitForStatus($target, '00:00:15')
+            return $true
+        } catch {
+            Write-Log "  $Action attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
+            if ($attempt -eq $MaxAttempts) { throw }
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
 Write-Log '--- resume detected, starting recovery ---'
 
 try {
-    # 1) Stop the tray client if it is running, so it is not holding the
-    #    port or racing the service restart.
-    $client = Get-Process -Name $ClientProc -ErrorAction SilentlyContinue
-    if ($client) {
-        Stop-Process -Name $ClientProc -Force
-        Write-Log "stopped $ClientProc (was PID $($client.Id -join ','))"
-    } else {
-        Write-Log "$ClientProc was not running"
-    }
-
-    # 2) Stop the service before touching the ini it has open.
+    # 1) Stop the service before touching the ini it has open. The tray
+    #    client is handled last, after the service is settled -- it is only
+    #    a UI on top of the service, not required for the bridge itself.
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if (-not $svc) {
         Write-Log "ERROR: service '$ServiceName' not found - nothing to recover"
         return
     }
     if ($svc.Status -ne 'Stopped') {
-        Stop-Service -Name $ServiceName -Force
-        (Get-Service -Name $ServiceName).WaitForStatus('Stopped', '00:00:15')
+        Invoke-ServiceControlWithRetry -Name $ServiceName -Action Stop
     }
     Write-Log "service stopped"
 
@@ -79,13 +101,18 @@ try {
     }
 
     # 4) Bring the service back. ConnectIfPortClosed=1 in the ini means it
-    #    redials on its own once something opens COM15 -- the tray client
-    #    does not need to be relaunched separately for the bridge to work,
-    #    only for the systray icon/UI to reappear.
-    Start-Service -Name $ServiceName
-    (Get-Service -Name $ServiceName).WaitForStatus('Running', '00:00:15')
+    #    redials on its own once something opens COM15.
+    Invoke-ServiceControlWithRetry -Name $ServiceName -Action Start
     Write-Log "service started, status=$((Get-Service -Name $ServiceName).Status)"
 
+    # 5) Tray client last: kill any stale instance and relaunch fresh, now
+    #    that the service it talks to is up and stable.
+    $client = Get-Process -Name $ClientProc -ErrorAction SilentlyContinue
+    if ($client) {
+        Stop-Process -Name $ClientProc -Force
+        Write-Log "stopped stale $ClientProc (was PID $($client.Id -join ','))"
+        Start-Sleep -Seconds 1
+    }
     Start-Process -FilePath "C:\Program Files (x86)\HW group\HW VSP3s\$ClientProc.exe" -ErrorAction SilentlyContinue
     Write-Log "relaunched $ClientProc (tray UI)"
 
