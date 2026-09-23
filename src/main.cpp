@@ -399,6 +399,7 @@ static void perfDiagHandle()
 	         (unsigned long)rawChunks, (unsigned long)rawMaxChunk, (unsigned long)rawMaxUsed);
 	c.println(shCustomProtocol.perfFieldDump());
 	c.print("prevAlertText=["); c.print(shCustomProtocol.getPrevAlertTextDiag()); c.println("]");
+	c.println(shCustomProtocol.pageChangeDump());
 
 	c.flush();
 	c.stop();
@@ -654,10 +655,12 @@ void processButtonBoxLine(const String &line) {
 		buzzerBeep(60); // Feedback de confirmação do menu MFC
 		// Legacy compatibility
 		if (val == "PAGE_NEXT") {
-			shCustomProtocol.pageNextExternal();
+			shCustomProtocol.pgUartMfc++;
+			shCustomProtocol.pageNextExternal("UART:MFC");
 			msg = "PAGE +";
 		} else if (val == "PAGE_PREV") {
-			shCustomProtocol.pagePrevExternal();
+			shCustomProtocol.pgUartMfc++;
+			shCustomProtocol.pagePrevExternal("UART:MFC");
 			msg = "PAGE -";
 		} else {
 			msg = String("MFC OK: ") + val;
@@ -672,10 +675,12 @@ void processButtonBoxLine(const String &line) {
 			msg = "BRIGHT: invalid";
 		}
 	} else if (cat == "PAGE" && func == "NEXT") {
-		shCustomProtocol.pageNextExternal();
+		shCustomProtocol.pgUartPage++;
+		shCustomProtocol.pageNextExternal("UART:PAGE");
 		msg = "";
 	} else if (cat == "PAGE" && func == "PREV") {
-		shCustomProtocol.pagePrevExternal();
+		shCustomProtocol.pgUartPage++;
+		shCustomProtocol.pagePrevExternal("UART:PAGE");
 		msg = "";
 	} else if (cat == "BITE" && func == "VAL") {
 		msg = String("BITE: ") + val + "%";

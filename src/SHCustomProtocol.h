@@ -68,6 +68,7 @@ struct TouchPoint {
 	int16_t x;
 	int16_t y;
 	bool touched;
+	uint8_t raw;      // TD_STATUS as read, kept for the page-change log
 };
 
 bool touchInitialized = false;
@@ -357,30 +358,58 @@ private:
 
 	// Read touch point from FT6336U
 	TouchPoint readTouch() {
-		TouchPoint point = {0, 0, false};
+		TouchPoint point = {0, 0, false, 0};
 		if (!touchInitialized) return point;
 
-		// Read FT6336U touch data from registers
+		// The touch panel is the full 480x320 glass. SCREEN_HEIGHT is 272
+		// (the drawable area above the status bar), so it must not be used
+		// to bounds-check a touch.
+		const int16_t TP_MAX_X = 320;   // portrait X -> display Y
+		const int16_t TP_MAX_Y = 480;   // portrait Y -> display X
+
 		Wire.beginTransmission(TOUCH_ADDRESS);
-		Wire.write(0x02);  // TD_STATUS register
-		Wire.endTransmission();
+		Wire.write(0x02);  // TD_STATUS
+		if (Wire.endTransmission() != 0) { touchRejected++; return point; }
 
-		Wire.requestFrom(TOUCH_ADDRESS, 5);  // Read 5 bytes: status + X high + X low + Y high + Y low
-		if (Wire.available() >= 5) {
-			uint8_t status = Wire.read();     // TD_STATUS (bit 0 = touch detected)
-			uint8_t x_high = Wire.read();     // Touch X High byte
-			uint8_t x_low = Wire.read();      // Touch X Low byte
-			uint8_t y_high = Wire.read();     // Touch Y High byte
-			uint8_t y_low = Wire.read();      // Touch Y Low byte
+		if (Wire.requestFrom(TOUCH_ADDRESS, 5) < 5) { touchRejected++; return point; }
+		if (Wire.available() < 5)                   { touchRejected++; return point; }
 
-			// Only process if touch is detected (bit 0 set in status)
-			if (status & 0x01) {
-				// Extract coordinates - FT6336U stores X as 12-bit value
-				point.x = ((x_high & 0x0F) << 8) | x_low;
-				point.y = ((y_high & 0x0F) << 8) | y_low;
-				point.touched = true;
-			}
+		uint8_t status = Wire.read();
+		uint8_t x_high = Wire.read();
+		uint8_t x_low  = Wire.read();
+		uint8_t y_high = Wire.read();
+		uint8_t y_low  = Wire.read();
+
+		// TD_STATUS's low nibble is the NUMBER of touch points (0..2), not a
+		// flag. Testing `status & 0x01` turned any odd byte from a corrupted
+		// read -- 0xFF, 0x35, anything -- into a valid touch, which is what a
+		// phantom page change looks like. The high nibble is reserved and
+		// reads 0 on a healthy part, so anything set there means noise.
+		uint8_t nTouch = status & 0x0F;
+		if (nTouch == 0) return point;                       // nothing on the glass
+		if (nTouch > 2 || (status & 0xF0) != 0) {
+			touchRejected++;
+			touchLastBadStatus = status;
+			return point;
 		}
+
+		// Bits 7:6 of the X high byte are the event: 00 press down, 10
+		// contact. 01 is lift-up and 11 is reserved -- neither is a press.
+		uint8_t evt = x_high >> 6;
+		if (evt == 0x01 || evt == 0x03) return point;
+
+		int16_t x = ((x_high & 0x0F) << 8) | x_low;
+		int16_t y = ((y_high & 0x0F) << 8) | y_low;
+		if (x < 0 || x >= TP_MAX_X || y < 0 || y >= TP_MAX_Y) {
+			touchRejected++;
+			touchLastBadStatus = status;
+			return point;
+		}
+
+		point.x = x;
+		point.y = y;
+		point.raw = status;
+		point.touched = true;
 		return point;
 	}
 
@@ -469,6 +498,41 @@ public:
 	// wrong one of these is a field-offset bug, not a rendering bug.
 	String getPrevAlertTextDiag() { return prevAlertText; }
 
+	// Page-change forensics. The dash occasionally switches page on its own,
+	// it is not reproducible on demand and has no known trigger, so rather
+	// than trying to catch it live every change is recorded here with its
+	// cause and read back over PERF_DIAG afterwards. touchRejected is the
+	// telling one: if it climbs while driving, electrical noise is reaching
+	// the touch controller and the old `status & 0x01` test would have been
+	// turning some of it into page changes.
+	volatile uint32_t pgTouch = 0, pgUartPage = 0, pgUartMfc = 0;
+	volatile uint32_t touchRejected = 0;
+	volatile uint8_t  touchLastBadStatus = 0;
+	static const uint8_t PG_LOG_N = 8;
+	String pgLog[PG_LOG_N];
+	uint8_t pgLogIdx = 0;
+
+	void notePageChange(const String &why) {
+		pgLog[pgLogIdx] = String(millis() / 1000) + "s " + why;
+		pgLogIdx = (pgLogIdx + 1) % PG_LOG_N;
+	}
+
+	String pageChangeDump() {
+		String out = "page_src touch=" + String(pgTouch) +
+		             " uart_page=" + String(pgUartPage) +
+		             " uart_mfc=" + String(pgUartMfc) +
+		             " touch_rejected=" + String(touchRejected) +
+		             " last_bad=0x" + String(touchLastBadStatus, HEX) + "\n";
+		out += "page changes (oldest first):";
+		bool any = false;
+		for (uint8_t i = 0; i < PG_LOG_N; i++) {
+			String &e = pgLog[(pgLogIdx + i) % PG_LOG_N];
+			if (e.length()) { out += "\n  " + e; any = true; }
+		}
+		if (!any) out += " none";
+		return out;
+	}
+
 	String perfFieldDump() {
 		return "speed=" + speed + " gear=" + gear + " sessTime=" + sessionTimeLeft +
 		       " flag=" + currentFlag + " pen=" + currentPenalties +
@@ -484,12 +548,14 @@ public:
 		popupFromUartUntil = millis() + durationMs;
 	}
 
-	void pageNextExternal() {
+	void pageNextExternal(const char *src = "?") {
+		notePageChange(String(src) + " PAGE+");
 		buzzerBeep(80);
 		nextPage();
 	}
 
-	void pagePrevExternal() {
+	void pagePrevExternal(const char *src = "?") {
+		notePageChange(String(src) + " PAGE-");
 		buzzerBeep(80);
 		prevPage();
 	}
@@ -913,12 +979,15 @@ public:
 				Serial.printf("[TOUCH] x=%d y=%d (display_x≈touch.y, threshold=%d)\n",
 					touch.x, touch.y, SCREEN_WIDTH / 2);
 
+				pgTouch++;
+				String tag = "TOUCH raw=0x" + String(touch.raw, HEX) +
+				             " x=" + String(touch.x) + " y=" + String(touch.y);
 				if (touch.y < SCREEN_WIDTH / 2) {
 					// Left half of display → previous page
-					pagePrevExternal();  // includes buzzer + fillScreen + resetDrawCache
+					pagePrevExternal(tag.c_str());  // buzzer + fillScreen + resetDrawCache
 				} else {
 					// Right half of display → next page
-					pageNextExternal();  // includes buzzer + fillScreen + resetDrawCache
+					pageNextExternal(tag.c_str());  // buzzer + fillScreen + resetDrawCache
 				}
 			}
 		}
