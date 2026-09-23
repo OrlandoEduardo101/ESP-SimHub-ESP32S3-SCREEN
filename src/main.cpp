@@ -38,6 +38,10 @@ volatile uint32_t rawOverflows = 0;
 volatile uint32_t rawMaxChunk = 0;
 volatile uint32_t rawMaxUsed = 0;
 volatile uint32_t rawChunks = 0;
+volatile uint32_t rawMaxGapMs = 0;
+volatile uint32_t rawLongGaps = 0;
+volatile uint32_t rawMultiFrameChunks = 0;
+volatile uint32_t rawLastChunkMs = 0;
 
 // How many frames may sit queued before we start skipping to the newest.
 #define RAW_FRAME_BACKLOG 4
@@ -397,6 +401,9 @@ static void perfDiagHandle()
 	         (unsigned long)rawOverflows);
 	c.printf("chunks=%lu max_chunk=%lu max_used=%lu\n",
 	         (unsigned long)rawChunks, (unsigned long)rawMaxChunk, (unsigned long)rawMaxUsed);
+	c.printf("gap_max_ms=%lu gaps_over_100ms=%lu multi_frame_chunks=%lu\n",
+	         (unsigned long)rawMaxGapMs, (unsigned long)rawLongGaps,
+	         (unsigned long)rawMultiFrameChunks);
 	c.println(shCustomProtocol.perfFieldDump());
 	c.print("prevAlertText=["); c.print(shCustomProtocol.getPrevAlertTextDiag()); c.println("]");
 	c.println(shCustomProtocol.pageChangeDump());
@@ -412,6 +419,7 @@ static void perfDiagHandle()
 	perfLoops = perfLoopMaxUs = perfUartUs = 0;
 	perfShortFrames = perfFullFrames = 0;
 	rawMaxChunk = rawMaxUsed = rawChunks = rawOverflows = 0;
+	rawMaxGapMs = rawLongGaps = rawMultiFrameChunks = 0;
 	perfSinceMs = millis();
 }
 

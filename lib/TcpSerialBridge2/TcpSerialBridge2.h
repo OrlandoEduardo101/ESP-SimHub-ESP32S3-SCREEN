@@ -37,6 +37,17 @@ extern volatile uint32_t rawMaxChunk;
 extern volatile uint32_t rawMaxUsed;
 extern volatile uint32_t rawChunks;
 
+// PERF_DIAG: delivery regularity, separate from delivery rate. A panel can
+// receive 25 frames/s and still look like it updates at 5 if they arrive as
+// five bursts of five -- the burst is drawn in a few ms and only its last
+// frame is ever visible. Largest gap between chunks, how many gaps exceeded
+// 100ms, and how many chunks carried more than one frame (the signature of a
+// sender coalescing writes, e.g. Nagle waiting on a delayed ACK).
+extern volatile uint32_t rawMaxGapMs;
+extern volatile uint32_t rawLongGaps;
+extern volatile uint32_t rawMultiFrameChunks;
+extern volatile uint32_t rawLastChunkMs;
+
 // Frame terminator the sender appends (defined in ArqSerial.h, repeated here
 // because this header is included first). A plain printable character on
 // purpose: SimHub's NCalc has no chr(), so a control byte would have forced the
@@ -617,9 +628,23 @@ private:
         rawResyncNeeded = true;
         rawOverflows++;
       }
-      for (size_t i = 0; i < len; i++) {
-        if (castData[i] == RAW_FRAME_TERMINATOR) __atomic_add_fetch(&rawFramesPending, 1, __ATOMIC_RELAXED);
+      {
+        const uint32_t now = millis();
+        if (rawLastChunkMs != 0) {
+          const uint32_t gap = now - rawLastChunkMs;
+          if (gap > rawMaxGapMs) rawMaxGapMs = gap;
+          if (gap > 100) rawLongGaps++;
+        }
+        rawLastChunkMs = now;
       }
+      uint32_t framesInChunk = 0;
+      for (size_t i = 0; i < len; i++) {
+        if (castData[i] == RAW_FRAME_TERMINATOR) {
+          __atomic_add_fetch(&rawFramesPending, 1, __ATOMIC_RELAXED);
+          framesInChunk++;
+        }
+      }
+      if (framesInChunk >= 2) rawMultiFrameChunks++;
     }
     this->incomingStream->write(castData, (size_t)len);
   }
