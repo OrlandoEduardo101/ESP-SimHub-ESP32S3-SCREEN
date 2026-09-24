@@ -240,7 +240,10 @@ private:
 	// Kind + direction are all that's fixed; drawAlert() recomputes the text
 	// from live telemetry on every redraw for as long as the window is open,
 	// so it catches up the moment the game's own state actually changes.
-	enum UartPopupKind : uint8_t { UART_POPUP_TEXT = 0, UART_POPUP_ERS, UART_POPUP_FUEL };
+	enum UartPopupKind : uint8_t {
+		UART_POPUP_TEXT = 0, UART_POPUP_ERS, UART_POPUP_FUEL,
+		UART_POPUP_MAP, UART_POPUP_ABS, UART_POPUP_TURBO, UART_POPUP_REGEN, UART_POPUP_SOC
+	};
 	UartPopupKind uartPopupKind = UART_POPUP_TEXT;
 	bool uartPopupStepUp = true;
 	String prevAlertText = "";  // Track previous alert text to avoid resetting timer on same alert
@@ -610,6 +613,42 @@ public:
 		popupFromUart = true;
 		popupFromUartUntil = millis() + durationMs;
 	}
+
+	// Shared by the five show*StepPopup() wrappers below -- same
+	// self-updating-text mechanism as showErsStepPopup()/showFuelStepPopup()
+	// (left as their own functions above, unchanged, rather than folded into
+	// this: they already shipped and there's no reason to touch a working
+	// path while refactoring). Parameterized over which telemetry field each
+	// one draws from instead of five near-identical copies.
+	void showTelemetryStepPopup(UartPopupKind kind, bool up, uint32_t durationMs = 3000) {
+		redrawPending = true;
+		uartPopupKind = kind;
+		uartPopupStepUp = up;
+		uartPopupMessage = "";
+		popupFromUart = true;
+		popupFromUartUntil = millis() + durationMs;
+	}
+	// $MAP:STEP:UP/DN -- ersDeployMode already resolves to the right thing
+	// per game (ACC's real ErsDeployMode first, then LMU's
+	// LMU_NeoRedPlugin.Extended.VM_ELECTRIC_MOTOR_MAP, confirmed against
+	// Haagel's own dashboard code to return the game's native label already
+	// -- a number for Hypercar, literal text like "Safety-car" for GT3, no
+	// per-class logic needed here). The generic [EngineMap] SimHub exposes
+	// is a bare rFactor2-engine index (what showed as "1, 2, 3..." instead
+	// of the real label) -- deliberately not used for this popup.
+	void showMapStepPopup(bool up, uint32_t durationMs = 3000) { showTelemetryStepPopup(UART_POPUP_MAP, up, durationMs); }
+	// $ABS:STEP:UP/DN -- absLevel, already a plain numbered field.
+	void showAbsStepPopup(bool up, uint32_t durationMs = 3000) { showTelemetryStepPopup(UART_POPUP_ABS, up, durationMs); }
+	// $TURBO:STEP:UP/DN -- turboBoost (bar), for AC1-style turbo cars where
+	// this same wheel button is used to trim boost rather than an ERS map.
+	void showTurboStepPopup(bool up, uint32_t durationMs = 3000) { showTelemetryStepPopup(UART_POPUP_TURBO, up, durationMs); }
+	// $REGEN:STEP:UP/DN -- regenLevel, wired yesterday.
+	void showRegenStepPopup(bool up, uint32_t durationMs = 3000) { showTelemetryStepPopup(UART_POPUP_REGEN, up, durationMs); }
+	// $SOC:STEP:UP/DN -- kersLevel (battery state of charge, 0-100%). Read-
+	// only in spirit (nothing to actually step), but takes the same UP/DN
+	// shape as the others for dispatch consistency; the direction arrow is
+	// just cosmetic here.
+	void showSocStepPopup(bool up, uint32_t durationMs = 3000) { showTelemetryStepPopup(UART_POPUP_SOC, up, durationMs); }
 
 	// $CALIB:START:HALL -- opens the panel immediately, before any live data
 	// exists yet, so it's on screen for the whole calibration from the first
@@ -3129,6 +3168,18 @@ public:
 		} else if (uartPopupKind == UART_POPUP_FUEL) {
 			uartPopupNormalized = String(uartPopupStepUp ? "FUEL ^ " : "FUEL v ") +
 				fuelRemainingLaps + "L " + fuelLitersPerLap + "L/L";
+		} else if (uartPopupKind == UART_POPUP_MAP) {
+			// ersDeployMode already resolves to the right per-game label --
+			// see showMapStepPopup()'s comment for why this isn't [EngineMap].
+			uartPopupNormalized = String(uartPopupStepUp ? "MAP ^ " : "MAP v ") + ersDeployMode;
+		} else if (uartPopupKind == UART_POPUP_ABS) {
+			uartPopupNormalized = String(uartPopupStepUp ? "ABS ^ " : "ABS v ") + absLevel;
+		} else if (uartPopupKind == UART_POPUP_TURBO) {
+			uartPopupNormalized = String(uartPopupStepUp ? "TURBO ^ " : "TURBO v ") + turboBoost + " bar";
+		} else if (uartPopupKind == UART_POPUP_REGEN) {
+			uartPopupNormalized = String(uartPopupStepUp ? "REGEN ^ " : "REGEN v ") + regenLevel;
+		} else if (uartPopupKind == UART_POPUP_SOC) {
+			uartPopupNormalized = String("SOC ") + kersLevel + "%";
 		} else {
 			uartPopupNormalized = uartPopupMessage;
 			uartPopupNormalized.trim();

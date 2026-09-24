@@ -753,6 +753,21 @@ void processButtonBoxLine(const String &line) {
 	} else if (cat == "FUEL" && func == "STEP") {
 		shCustomProtocol.showFuelStepPopup(val == "UP");
 		msg = "";
+	} else if (cat == "MAP" && func == "STEP") {
+		shCustomProtocol.showMapStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "ABS" && func == "STEP") {
+		shCustomProtocol.showAbsStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "TURBO" && func == "STEP") {
+		shCustomProtocol.showTurboStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "REGEN" && func == "STEP") {
+		shCustomProtocol.showRegenStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "SOC" && func == "STEP") {
+		shCustomProtocol.showSocStepPopup(val == "UP");
+		msg = "";
 	} else if (cat == "ERS" && func == "MODE") {
 		// Legacy protocol from an un-updated wheel firmware: it invented this
 		// label from a local counter that never tracked the game's real ERS
