@@ -1763,7 +1763,7 @@ void uartSendInt(const char* cat, const char* func, int value) {
 // ================================
 String wt32RxLine;
 static bool handleTrimCommand(String line);   // defined below saveConfig()
-static bool handleWifiTestCommand(String line); // defined below, near the bottom
+static bool handleWheelOtaCommand(String line); // defined below, near the bottom
 uint16_t uartPingSeq = 0;
 uint16_t uartPingPendingSeq = 0;
 unsigned long uartPingSentAtMs = 0;
@@ -1790,7 +1790,7 @@ void handleWt32UartRx() {
                 DBGF("[UART] RX raw: %s", wt32RxLine.c_str());
                 if (handleTrimCommand(wt32RxLine)) {
                     // consumed
-                } else if (handleWifiTestCommand(wt32RxLine)) {
+                } else if (handleWheelOtaCommand(wt32RxLine)) {
                     // consumed
                 } else if (wt32RxLine.startsWith("$WT:PONG:")) {
                     String seqStr = wt32RxLine.substring(9);
@@ -2150,6 +2150,9 @@ static bool handleTrimCommand(String line) {
 // Forward declarations
 void triggerVirtualButton(uint8_t btnId, uint16_t durationMs = 100);
 void uartSend(const char* cat, const char* func, const char* val);
+static void wheelOtaArm();               // defined below, near loop()
+static void wheelOtaDisarm(const char* reason);
+extern bool wheelOtaArmed;
 
 bool shouldReportMatrixButton(uint8_t buttonNum) {
     // Exclude 5-way directions (slots 25-28) from HID buttons
@@ -3028,6 +3031,13 @@ void handleMfcPress() {
                     uartSend("MFC", "CONFIRM", "TRIM");
                     trimReport();
                 }
+            } else if (item == MFC_RESET) {
+                // Free gesture: RESET's SHIFT+short-press slot was unused
+                // (SHIFT+hold on RESET is the separate BLE toggle). Parking
+                // both wireless toggles on the same item is deliberate — it's
+                // the one place a user already knows to look for them.
+                if (wheelOtaArmed) wheelOtaDisarm("gesture");
+                else wheelOtaArm();
             }
         }
 
@@ -3459,112 +3469,159 @@ void handleMultimediaButtons() {
 }
 
 // ================================
-// WIFI SURVIVAL TEST (diagnostic, opt-in via debug UART only)
+// WHEEL OTA (WiFi firmware update, opt-in — off by default, never at boot)
 // ================================
-// Question under test: does THIS board survive powering on WiFi, the way it
-// did NOT survive powering on BLE (documented brownout, see
-// docs/SESSION_HANDOFF_WIRELESS.md, "Problema não resolvido #1")? WiFi's
-// association/TX current draw is materially higher than BLE's, so the BLE
-// result doesn't answer this by itself, and OTA over WiFi is worth building
-// only if the radio can come up at all on this board's power rail.
+// Mirrors the screen's OTA (docs/WIRELESS.md), but built on a different
+// credential path on purpose: the screen uses a WiFiManager captive portal
+// (AP + DNS server + web server, all running at once), and that combination
+// was never load-tested on THIS board. What was tested — see git log for
+// "WiFi survival test" — is plain STA mode: WiFi.mode(WIFI_STA) +
+// WiFi.begin(), armed 8s after boot, ~20s of association attempts, no
+// brownout. Given this wheel's documented BLE brownout history, shipping a
+// heavier, untested radio mode (the portal's AP broadcast plus two
+// concurrent servers) isn't a good place to find a new power limit. Plain
+// STA, already proven, is the smaller bet — see src/wifi_credentials.h.
 //
-// Deliberately embedded in the real firmware rather than a separate sketch:
-// WiFi is armed ONLY by the $WIFITEST:START debug command below, never at
-// boot, so one flash covers the test AND (if it survives) every later
-// experiment — no second upload needed either way. If arming it browns out
-// the board, the reset that follows comes back up into this SAME firmware
-// with WiFi off, exactly like any other boot, because nothing here starts
-// WiFi automatically. Recovery is therefore a self-reset, not a reflash —
-// deliberate, given a flaky USB cable makes repeat uploads expensive.
+// Never armed at boot, same as BLE: WiFi only turns on when explicitly
+// requested (SHIFT + short press on RESET — see the short-press dispatch
+// below), and auto-disarms after WHEEL_OTA_IDLE_TIMEOUT_MS with no transfer
+// in progress, so forgetting to turn it off before a race doesn't leave the
+// radio — and an open OTA listener — running indefinitely. If a transfer IS
+// in progress, the idle timer is suppressed (see otaTransferActive) so a
+// slow upload never gets cut off mid-write.
 //
-// Bogus credentials on purpose: association will fail, but the radio still
-// powers up and transmits probe/auth frames trying, which is the power event
-// under test, not whether a real network gets joined.
+// A failed/aborted transfer cannot corrupt the firmware currently running:
+// ArduinoOTA writes to the OTHER app partition (this board's scheme has two,
+// confirmed by build output — see git log) and only flips the boot pointer
+// after the write verifies. Worst case if power is lost mid-write is simply
+// a wasted attempt, not a bricked wheel.
 #include <WiFi.h>
-bool wifiTestArmed = false;
-unsigned long wifiTestArmedAtMs = 0;
-unsigned long lastWifiTestReportMs = 0;
+#include <ArduinoOTA.h>
+#include "wifi_credentials.h"
 
-// Auto-arm timer, in addition to the $WIFITEST:START command. Found out the
-// hard way that the command path can't be trusted for this test: the debug
-// UART's RX pin (GPIO11) is wired to the WT32 screen's TX
-// (docs/PINMAP_SOLDERING_GUIDE.md:657), and the CH343 USB-serial adapter used
-// to WATCH this link only taps it for monitoring — a PC terminal writing to
-// it has no guaranteed path to the wheel's RX with the screen's TX already
-// driving that same line. Reading (monitoring) is proven to work; writing is
-// not. An unconditional timer sidesteps the question entirely: no command
-// needs to arrive for the test to run, only the debug output needs to be
-// watched, which already works.
-static const unsigned long WIFI_TEST_AUTOARM_MS = 8000;
-bool wifiTestAutoArmDone = false;
+// Must match the --auth flag in the wroom1-n8r8-wheel-ota platformio.ini env.
+#define WHEEL_OTA_PASSWORD "changeme-wheel-ota"
 
-static bool handleWifiTestCommand(String line) {
-    if (!line.startsWith("$WIFITEST:")) return false;
-    String rest = line.substring(10);
+static const unsigned long WHEEL_OTA_IDLE_TIMEOUT_MS = 10UL * 60UL * 1000UL; // 10 min
+bool wheelOtaArmed = false;         // WiFi requested on, association in progress or done
+bool wheelOtaListening = false;     // ArduinoOTA.begin() has run (only once actually connected)
+bool otaTransferActive = false;     // suppresses the idle timeout mid-write
+unsigned long wheelOtaLastActivityMs = 0;
+unsigned long lastWheelOtaReportMs = 0;
+
+static void wheelOtaArm() {
+    if (wheelOtaArmed) return;
+    DBG("[WOTA] arming - powering on radio (WiFi.mode + begin)...");
+    wheelOtaArmed = true;
+    wheelOtaListening = false;
+    wheelOtaLastActivityMs = millis();
+    lastWheelOtaReportMs = 0;
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname("esp-wheel");
+    WiFi.begin(WHEEL_WIFI_SSID, WHEEL_WIFI_PASSWORD);
+    uartSend("WOTA", "STATE", "ARMING");
+}
+
+static void wheelOtaDisarm(const char* reason) {
+    if (!wheelOtaArmed) return;
+    DBGF("[WOTA] disarming (%s) - radio off", reason);
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    wheelOtaArmed = false;
+    wheelOtaListening = false;
+    otaTransferActive = false;
+    uartSend("WOTA", "STATE", "OFF");
+}
+
+static void wheelOtaBeginListening() {
+    ArduinoOTA.setHostname("esp-wheel");
+    ArduinoOTA.setPassword(WHEEL_OTA_PASSWORD);
+    ArduinoOTA.onStart([]() {
+        otaTransferActive = true;
+        wheelOtaLastActivityMs = millis();
+        DBG("[WOTA] update starting...");
+        uartSend("WOTA", "PROGRESS", "START");
+    });
+    ArduinoOTA.onEnd([]() {
+        DBG("[WOTA] update done, rebooting");
+        uartSend("WOTA", "PROGRESS", "DONE");
+        // No need to clear otaTransferActive/disarm - the board reboots right
+        // after this callback returns, and wheelOtaArmed is never persisted,
+        // so the new firmware boots with WiFi off by default regardless.
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        wheelOtaLastActivityMs = millis();
+        static uint8_t lastPct = 255;
+        uint8_t pct = (total > 0) ? (uint8_t)((progress * 100) / total) : 0;
+        if (pct != lastPct) {
+            lastPct = pct;
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%u", (unsigned)pct);
+            uartSend("WOTA", "PROGRESS", buf);
+        }
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        otaTransferActive = false;
+        DBGF("[WOTA] error %d", (int)error);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", (int)error);
+        uartSend("WOTA", "ERROR", buf);
+    });
+    ArduinoOTA.begin();
+    wheelOtaListening = true;
+    IPAddress ip = WiFi.localIP();
+    DBGF("[WOTA] listening - esp-wheel.local, IP %u.%u.%u.%u",
+         ip[0], ip[1], ip[2], ip[3]);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+    uartSend("WOTA", "STATE", buf);
+}
+
+// Toggled by SHIFT + short press on RESET (see the short-press dispatch in
+// handleMfcPress()). Debug-UART $WOTA:ON/OFF are also accepted, but per the
+// wiring finding above (GPIO11 is the screen's TX, not the PC debug tap's),
+// don't rely on a PC terminal reaching this - the physical gesture is the
+// dependable path.
+static bool handleWheelOtaCommand(String line) {
+    if (!line.startsWith("$WOTA:")) return false;
+    String rest = line.substring(6);
     rest.trim();
     rest.toUpperCase();
-
-    if (rest == "START") {
-        if (wifiTestArmed) {
-            DBG("[WIFITEST] already armed");
-            return true;
-        }
-        // Staggered power-on: at this point in a real boot, USB, I2C
-        // (MCP23017 + PCA9685) and the hall ADC are already up and settled —
-        // this command is only reachable after setup() completes, well past
-        // all of that. Hitting WiFi's power draw on top of everything else
-        // initializing AT ONCE is a plausible reason a marginal 3.3V rail
-        // tolerates each subsystem alone but not several together, which is
-        // the shape of the BLE brownout already on record. The real opt-in
-        // OTA mode, if this test passes, should keep the same shape: WiFi
-        // arms long after boot has settled, on an explicit request, never as
-        // part of the power-on sequence itself.
-        DBG("[WIFITEST] arming — powering on radio (WiFi.mode + begin)...");
-        wifiTestArmedAtMs = millis();
-        WiFi.mode(WIFI_STA);
-        WiFi.begin("wheel-survival-test", "irrelevant1");
-        wifiTestArmed = true;
-        lastWifiTestReportMs = 0;  // force an immediate report on the next loop()
-        DBG("[WIFITEST] begin() returned — if you're reading this over the "
-            "same UART, the radio came up without an immediate brownout.");
-    } else if (rest == "STOP") {
-        if (wifiTestArmed) {
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
-            wifiTestArmed = false;
-            DBG("[WIFITEST] disarmed — radio off");
-        }
-    } else {
-        DBG("[WIFITEST] usage: $WIFITEST:START | $WIFITEST:STOP");
-    }
+    if (rest == "ON") wheelOtaArm();
+    else if (rest == "OFF") wheelOtaDisarm("command");
+    else DBG("[WOTA] usage: $WOTA:ON | $WOTA:OFF");
     return true;
 }
 
-// Periodic status while armed — heap and WiFi status, so a slow leak or a
-// stuck association shows up without needing another command.
-void wifiTestReport() {
-    if (!wifiTestArmed) return;
+void wheelOtaLoop() {
+    if (!wheelOtaArmed) return;
+
+    if (!wheelOtaListening && WiFi.status() == WL_CONNECTED) {
+        wheelOtaLastActivityMs = millis();
+        wheelOtaBeginListening();
+    }
+    if (wheelOtaListening) {
+        ArduinoOTA.handle();
+    }
+
     unsigned long now = millis();
-    if (now - lastWifiTestReportMs < 500) return;
-    lastWifiTestReportMs = now;
-    DBGF("[WIFITEST] t=%lums heap=%u wifiStatus=%d rssi=%d",
-         now - wifiTestArmedAtMs,
-         (unsigned)ESP.getFreeHeap(),
-         (int)WiFi.status(),
-         WiFi.RSSI());
+    if (now - lastWheelOtaReportMs >= 2000) {
+        lastWheelOtaReportMs = now;
+        DBGF("[WOTA] armed=%d listening=%d wifiStatus=%d heap=%u",
+             wheelOtaArmed, wheelOtaListening, (int)WiFi.status(),
+             (unsigned)ESP.getFreeHeap());
+    }
+
+    if (!otaTransferActive && (now - wheelOtaLastActivityMs) >= WHEEL_OTA_IDLE_TIMEOUT_MS) {
+        wheelOtaDisarm("idle timeout");
+    }
 }
 
 void loop() {
     // UART to WT32: always active (round wheel just sends to nothing, harmless)
     handleWt32UartRx();
     uartRoundtripTask();
-    wifiTestReport();
-
-    if (!wifiTestAutoArmDone && !wifiTestArmed && millis() >= WIFI_TEST_AUTOARM_MS) {
-        wifiTestAutoArmDone = true;
-        DBG("[WIFITEST] auto-arm timer fired (8s post-boot)");
-        handleWifiTestCommand("$WIFITEST:START");
-    }
+    wheelOtaLoop();
 
     // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
     scanEncoders();

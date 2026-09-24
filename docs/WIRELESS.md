@@ -1,4 +1,4 @@
-# Modo Sem Fio (WiFi da tela / BLE do volante) — opt-in, padrão desligado
+# Modo Sem Fio (WiFi da tela / BLE do volante / WiFi OTA do volante) — opt-in, padrão desligado
 
 ## Contexto
 
@@ -6,7 +6,7 @@ Ambas as placas (WT32-SC01 Plus e ESP32-S3-WROOM1-N8R8 do volante) têm WiFi/BLE
 de fábrica, mas o projeto sempre usou USB (dados) + UART (entre as placas) por
 serem determinísticos e de baixíssima latência — essencial pra input de corrida.
 
-Este modo adiciona duas opções sem fio **totalmente opcionais**, cada uma
+Este modo adiciona opções sem fio **totalmente opcionais**, cada uma
 **alternativa** ao seu transporte com fio (nunca simultânea) e com **padrão
 desligado**:
 
@@ -15,7 +15,13 @@ desligado**:
   cabo de dados disponível.
 - **BLE do volante**: quando ligado, o volante vira um gamepad Bluetooth LE em
   vez de gamepad USB. Útil pra uso casual sem fio. **Não recomendado para uso
-  competitivo** — BLE tem latência maior que USB HID.
+  competitivo** — BLE tem latência maior que USB HID. **Bloqueado por
+  hardware nesta placa** — ver `docs/SESSION_HANDOFF_WIRELESS.md`, seção
+  "brownout do volante".
+- **WiFi OTA do volante**: quando armado, permite gravar o firmware do volante
+  pela rede em vez de USB. Só existe pra atualização — nunca fica ligado
+  durante uso normal, e se desarma sozinho depois de 10 min parado. Ver seção
+  própria abaixo.
 
 O UART entre as duas placas **continua com fio** (conectores soldados, placas
 fisicamente próximas) — isso nunca foi tocado.
@@ -30,20 +36,25 @@ existente (SHIFT + segurar o botão do MFC) que hoje só faz uma coisa (alternar
 
 ## Como ativar
 
-Todos os gestos usam **SHIFT + segurar o botão do MFC**, com o encoder MFC
-parado no item indicado. Duração contada a partir do início do hold.
+Todos os gestos usam **SHIFT + o botão do MFC**, com o encoder MFC parado no
+item indicado. Duas famílias de gesto convivem no mesmo botão: **segurar**
+(duração contada a partir do início do hold) e **toque curto** (solta antes de
+1.5s — usados pelos itens que já tinham um SHIFT+hold reservado pra outra
+coisa, pra não competir com ele).
 
-| Item selecionado | Duração do hold | Ação |
+| Item selecionado | Gesto | Ação |
 |---|---|---|
-| Qualquer item, exceto RESET/CALIB | ≥ 1.5s | Alterna `ENC_MODE` (comportamento original, inalterado) |
-| **RESET** | ≥ 1.5s | **Liga/desliga BLE do volante** (aplica na hora, sem reboot) |
-| **CALIB** | solta entre 1.5s–4s | **Liga/desliga WiFi da tela** (aplica só no próximo reboot da tela) |
-| **CALIB** | ≥ 4s (ainda segurando) | **Força o portal de configuração WiFi** da tela (apaga credenciais salvas; aplica no próximo reboot) |
+| Qualquer item, exceto RESET/CALIB | SHIFT + hold ≥ 1.5s | Alterna `ENC_MODE` (comportamento original, inalterado) |
+| **RESET** | SHIFT + hold ≥ 1.5s | **Liga/desliga BLE do volante** (aplica na hora, sem reboot) |
+| **RESET** | SHIFT + toque curto | **Arma/desarma WiFi OTA do volante** (ver seção própria) |
+| **CALIB** | SHIFT + toque curto | **Liga/desliga o modo de ajuste fino (trim) dos halls** — ver `docs/AUDITORIA_PERFORMANCE_FIRMWARE.md` ou os comentários de `trimMode` em `src/main_wheel.cpp` |
+| **CALIB** | SHIFT + solta entre 1.5s–4s | **Liga/desliga WiFi da tela** (aplica só no próximo reboot da tela) |
+| **CALIB** | SHIFT + hold ≥ 4s (ainda segurando) | **Força o portal de configuração WiFi** da tela (apaga credenciais salvas; aplica no próximo reboot) |
 
 O toque curto (sem SHIFT) nos itens RESET e CALIB continua fazendo o que
 sempre fez (RESET = reseta configs de fábrica; CALIB = inicia/encerra
-calibração dos halls do clutch) — só a combinação SHIFT+hold nesses dois
-itens específicos foi reaproveitada.
+calibração dos halls do clutch) — só a combinação SHIFT nesses dois itens
+específicos foi reaproveitada.
 
 ## Por que WiFi só aplica no reboot, mas BLE é na hora
 
@@ -61,6 +72,46 @@ rápido o bastante pra ligar/desligar ao vivo.
 3. Conecte um celular/notebook na rede WiFi `ESP_<chipID>-SH` que a tela cria.
 4. Um portal cativo abre em `192.168.4.1` — escolha sua rede e senha.
 5. A tela reinicia e conecta na sua rede.
+
+## WiFi OTA do volante — diferente do da tela, de propósito
+
+A tela usa um portal cativo (WiFiManager: AP + DNS server + web server, tudo
+rodando junto) pra configurar a rede sem editar código. O volante **não**
+usa esse caminho — ver `git log` por "WiFi survival test" pro porquê: esse
+volante já deu brownout ao ligar o rádio BLE sozinho
+(`docs/SESSION_HANDOFF_WIRELESS.md`), então antes de construir qualquer coisa
+em cima de WiFi, testei se o rádio sobrevive nessa placa. Sobreviveu — mas só
+testei `WiFi.begin()` simples (modo STA), armado bem depois do boot. Portal
+cativo é um perfil de energia bem mais pesado (AP transmitindo beacon
+continuamente + dois servidores rodando junto) e nunca foi testado nessa
+placa. Dado o histórico de brownout, não é a primeira coisa que eu ligaria
+sem medir antes.
+
+Por isso o volante usa **credenciais fixas num arquivo fora do git**, não
+portal:
+
+1. Copie `src/wifi_credentials.h.example` para `src/wifi_credentials.h`
+   (esse segundo é gitignored — nunca é commitado).
+2. Preencha `WHEEL_WIFI_SSID` e `WHEEL_WIFI_PASSWORD` com sua rede.
+3. Grave o volante por USB uma vez (`pio run -e wroom1-n8r8-wheel -t upload`)
+   pra instalar o listener OTA.
+4. No volante: **SHIFT + toque curto no item RESET** arma o WiFi. Ele nunca
+   liga sozinho — nem no boot, nem em background — e se desarma sozinho
+   depois de 10 min parado (ou o mesmo gesto de novo, a qualquer momento).
+5. Confira a linha `[WOTA] listening — esp-wheel.local, IP ...` na serial de
+   debug (COM13, 115200) pra saber que IP a rede deu pra ele.
+6. Reserve esse IP por MAC (`dc:b4:d9:0b:51:6c`) no seu roteador — mesmo
+   lugar onde você reservou o `192.168.0.5` da tela. O env
+   `wroom1-n8r8-wheel-ota` já assume `192.168.0.6`; ajuste se reservar outro.
+7. `pio run -e wroom1-n8r8-wheel-ota -t upload` — precisa do WiFi armado no
+   volante primeiro (passo 4), senão não tem pra quem mandar o convite.
+
+Senha do OTA em `WHEEL_OTA_PASSWORD` (`src/main_wheel.cpp`) e no `--auth=` do
+env têm que bater — troque as duas juntas.
+
+O firewall do Windows bloqueia a mesma etapa inbound descrita na seção
+"Upload OTA e o firewall do Windows" abaixo; a porta do volante é
+**38301** (a da tela é 38300, propositalmente diferente pra não colidir).
 
 ## Transporte cru (porta 10002) — o modo rápido
 
@@ -305,6 +356,13 @@ New-NetFirewallRule -DisplayName "PlatformIO espota (ESP-SimHub)" -Direction Inb
 
 Ela libera uma única porta TCP e só pra o IP da tela.
 
+O volante usa a mesma etapa inbound, porta e IP próprios (ajuste o IP se
+reservou outro no seu roteador):
+
+```powershell
+New-NetFirewallRule -DisplayName "PlatformIO espota (ESP-Wheel)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 38301 -RemoteAddress 192.168.0.6
+```
+
 ## Limitações conhecidas (não resolvidas por este trabalho)
 
 - **USB HID do volante não é literalmente desligado.** TinyUSB fixa os
@@ -316,10 +374,12 @@ Ela libera uma única porta TCP e só pra o IP da tela.
   Recuperação: repita o gesto CALIB ≥4s pra forçar o portal de novo — mas se a
   placa não chegar a rodar `loop()` por estar presa reconectando, pode ser
   necessário regravar o firmware com o WiFi desligado.
-- **Sem hardware físico pra testar.** Ambos os ambientes (`wt32-sc01-plus` e
-  `wroom1-n8r8-wheel`) compilam limpos (`pio run`), com folga de RAM/Flash em
-  ambos, mas o comportamento em campo (conexão BLE real, portal WiFi real)
-  ainda não foi validado em bancada.
+- **BLE do volante segue bloqueado por brownout de hardware**, não resolvido
+  por nenhum trabalho de software feito até aqui (ver
+  `docs/SESSION_HANDOFF_WIRELESS.md`).
+- **WiFi OTA do volante não tem reconfiguração em runtime.** Trocar de rede
+  exige editar `src/wifi_credentials.h` e regravar por USB — decisão
+  deliberada (ver seção própria acima), não uma limitação temporária.
 
 ## Onde mexer no código
 
@@ -328,6 +388,9 @@ Ela libera uma única porta TCP e só pra o IP da tela.
   `$WIFI:PORTAL:` / `$BLE:STATE:` em `processButtonBoxLine()`.
 - `lib/TcpSerialBridge2/ECrowneWifi.h` — `ECrowneWifi::forgetCredentials()`.
 - `src/main_wheel.cpp` — seção "BLE HID GAMEPAD" (perto do topo),
-  `toggleBleMode()`, gestos em `handleMfcPress()`.
+  `toggleBleMode()`, gestos em `handleMfcPress()`; seção "WHEEL OTA" (perto do
+  `loop()`), `wheelOtaArm()`/`wheelOtaDisarm()`.
+- `src/wifi_credentials.h` / `.h.example` — credenciais do WiFi OTA do
+  volante (o primeiro é gitignored).
 - `platformio.ini` — dependência `h2zero/NimBLE-Arduino` no ambiente
   `wroom1-n8r8-wheel`.

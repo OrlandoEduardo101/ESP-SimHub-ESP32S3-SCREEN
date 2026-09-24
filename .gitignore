@@ -7,3 +7,6 @@
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Wheel WiFi OTA credentials — local only, never committed.
+src/wifi_credentials.h
