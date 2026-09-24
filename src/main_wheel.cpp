@@ -1763,6 +1763,7 @@ void uartSendInt(const char* cat, const char* func, int value) {
 // ================================
 String wt32RxLine;
 static bool handleTrimCommand(String line);   // defined below saveConfig()
+static bool handleWifiTestCommand(String line); // defined below, near the bottom
 uint16_t uartPingSeq = 0;
 uint16_t uartPingPendingSeq = 0;
 unsigned long uartPingSentAtMs = 0;
@@ -1788,6 +1789,8 @@ void handleWt32UartRx() {
             if (wt32RxLine.length() > 0) {
                 DBGF("[UART] RX raw: %s", wt32RxLine.c_str());
                 if (handleTrimCommand(wt32RxLine)) {
+                    // consumed
+                } else if (handleWifiTestCommand(wt32RxLine)) {
                     // consumed
                 } else if (wt32RxLine.startsWith("$WT:PONG:")) {
                     String seqStr = wt32RxLine.substring(9);
@@ -3455,10 +3458,94 @@ void handleMultimediaButtons() {
     lastFlashPressed = flashPressed;
 }
 
+// ================================
+// WIFI SURVIVAL TEST (diagnostic, opt-in via debug UART only)
+// ================================
+// Question under test: does THIS board survive powering on WiFi, the way it
+// did NOT survive powering on BLE (documented brownout, see
+// docs/SESSION_HANDOFF_WIRELESS.md, "Problema não resolvido #1")? WiFi's
+// association/TX current draw is materially higher than BLE's, so the BLE
+// result doesn't answer this by itself, and OTA over WiFi is worth building
+// only if the radio can come up at all on this board's power rail.
+//
+// Deliberately embedded in the real firmware rather than a separate sketch:
+// WiFi is armed ONLY by the $WIFITEST:START debug command below, never at
+// boot, so one flash covers the test AND (if it survives) every later
+// experiment — no second upload needed either way. If arming it browns out
+// the board, the reset that follows comes back up into this SAME firmware
+// with WiFi off, exactly like any other boot, because nothing here starts
+// WiFi automatically. Recovery is therefore a self-reset, not a reflash —
+// deliberate, given a flaky USB cable makes repeat uploads expensive.
+//
+// Bogus credentials on purpose: association will fail, but the radio still
+// powers up and transmits probe/auth frames trying, which is the power event
+// under test, not whether a real network gets joined.
+#include <WiFi.h>
+bool wifiTestArmed = false;
+unsigned long wifiTestArmedAtMs = 0;
+unsigned long lastWifiTestReportMs = 0;
+
+static bool handleWifiTestCommand(String line) {
+    if (!line.startsWith("$WIFITEST:")) return false;
+    String rest = line.substring(10);
+    rest.trim();
+    rest.toUpperCase();
+
+    if (rest == "START") {
+        if (wifiTestArmed) {
+            DBG("[WIFITEST] already armed");
+            return true;
+        }
+        // Staggered power-on: at this point in a real boot, USB, I2C
+        // (MCP23017 + PCA9685) and the hall ADC are already up and settled —
+        // this command is only reachable after setup() completes, well past
+        // all of that. Hitting WiFi's power draw on top of everything else
+        // initializing AT ONCE is a plausible reason a marginal 3.3V rail
+        // tolerates each subsystem alone but not several together, which is
+        // the shape of the BLE brownout already on record. The real opt-in
+        // OTA mode, if this test passes, should keep the same shape: WiFi
+        // arms long after boot has settled, on an explicit request, never as
+        // part of the power-on sequence itself.
+        DBG("[WIFITEST] arming — powering on radio (WiFi.mode + begin)...");
+        wifiTestArmedAtMs = millis();
+        WiFi.mode(WIFI_STA);
+        WiFi.begin("wheel-survival-test", "irrelevant1");
+        wifiTestArmed = true;
+        lastWifiTestReportMs = 0;  // force an immediate report on the next loop()
+        DBG("[WIFITEST] begin() returned — if you're reading this over the "
+            "same UART, the radio came up without an immediate brownout.");
+    } else if (rest == "STOP") {
+        if (wifiTestArmed) {
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            wifiTestArmed = false;
+            DBG("[WIFITEST] disarmed — radio off");
+        }
+    } else {
+        DBG("[WIFITEST] usage: $WIFITEST:START | $WIFITEST:STOP");
+    }
+    return true;
+}
+
+// Periodic status while armed — heap and WiFi status, so a slow leak or a
+// stuck association shows up without needing another command.
+void wifiTestReport() {
+    if (!wifiTestArmed) return;
+    unsigned long now = millis();
+    if (now - lastWifiTestReportMs < 500) return;
+    lastWifiTestReportMs = now;
+    DBGF("[WIFITEST] t=%lums heap=%u wifiStatus=%d rssi=%d",
+         now - wifiTestArmedAtMs,
+         (unsigned)ESP.getFreeHeap(),
+         (int)WiFi.status(),
+         WiFi.RSSI());
+}
+
 void loop() {
     // UART to WT32: always active (round wheel just sends to nothing, harmless)
     handleWt32UartRx();
     uartRoundtripTask();
+    wifiTestReport();
 
     // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
     scanEncoders();
