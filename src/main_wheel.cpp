@@ -3485,6 +3485,19 @@ bool wifiTestArmed = false;
 unsigned long wifiTestArmedAtMs = 0;
 unsigned long lastWifiTestReportMs = 0;
 
+// Auto-arm timer, in addition to the $WIFITEST:START command. Found out the
+// hard way that the command path can't be trusted for this test: the debug
+// UART's RX pin (GPIO11) is wired to the WT32 screen's TX
+// (docs/PINMAP_SOLDERING_GUIDE.md:657), and the CH343 USB-serial adapter used
+// to WATCH this link only taps it for monitoring — a PC terminal writing to
+// it has no guaranteed path to the wheel's RX with the screen's TX already
+// driving that same line. Reading (monitoring) is proven to work; writing is
+// not. An unconditional timer sidesteps the question entirely: no command
+// needs to arrive for the test to run, only the debug output needs to be
+// watched, which already works.
+static const unsigned long WIFI_TEST_AUTOARM_MS = 8000;
+bool wifiTestAutoArmDone = false;
+
 static bool handleWifiTestCommand(String line) {
     if (!line.startsWith("$WIFITEST:")) return false;
     String rest = line.substring(10);
@@ -3546,6 +3559,12 @@ void loop() {
     handleWt32UartRx();
     uartRoundtripTask();
     wifiTestReport();
+
+    if (!wifiTestAutoArmDone && !wifiTestArmed && millis() >= WIFI_TEST_AUTOARM_MS) {
+        wifiTestAutoArmDone = true;
+        DBG("[WIFITEST] auto-arm timer fired (8s post-boot)");
+        handleWifiTestCommand("$WIFITEST:START");
+    }
 
     // Encoders first — GPIO-only, sub-microsecond, needs highest poll rate
     scanEncoders();
