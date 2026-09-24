@@ -538,6 +538,10 @@ uint8_t trimSelEnd = 0;      // 0 = MIN, 1 = MAX
 // like the d-pad had died in-game. Drop out on its own after a quiet spell.
 static const unsigned long TRIM_MODE_TIMEOUT_MS = 60000;
 unsigned long trimLastActivityMs = 0;
+// Refresh rate for the screen's trim panel, comfortably inside the 1.5s after
+// which the screen closes it for lack of traffic.
+static const unsigned long TRIM_LIVE_MS = 250;
+unsigned long lastTrimLiveMs = 0;
 
 void updateHatFromMatrix() {
     // While trimming, the 5-way is the selector — don't also fire directions
@@ -1404,6 +1408,9 @@ static const int8_t  CLUTCH_HYSTERESIS    = 4;    // counts — axis must move t
 static const bool    HALL_RAW_DEBUG       = true;
 static const unsigned long HALL_RAW_DEBUG_MS = 100;
 unsigned long lastHallRawDebugMs = 0;
+// Rate for the screen's live calibration panel during a sweep.
+static const unsigned long CALIB_LIVE_MS = 200;
+unsigned long lastCalibLiveMs = 0;
 
 // --- Hall sampling pipeline -------------------------------------------------
 // The 12 front-button LEDs hang off the same 3.3V rail as the (ratiometric)
@@ -2029,14 +2036,28 @@ static const char* trimSelName() {
     return names[(trimSelChannel * 2) + trimSelEnd];
 }
 
-// Feedback for the on-wheel mode. Goes to the screen as an ADJUST popup, which
-// the display firmware already renders, so this needs no change over there.
+// Feed the screen's trim panel. The axis values are the whole point: tuning by
+// watching the number stop twitching beats reading a percentage and doing the
+// arithmetic. hallLastReportedA/B are what the game actually sees, post-mode
+// and post-hysteresis, so they are the honest thing to show.
+//
+// Format is "<target> <pct>% ax <A> <B>" — the screen reads the two axis values
+// as the last two space-separated tokens.
+static void trimLiveSend() {
+    lastTrimLiveMs = millis();
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%s %+d%% ax %d %d",
+             trimSelName(), *trimSelected(),
+             (int)hallLastReportedA, (int)hallLastReportedB);
+    uartSend("TRIM", "LIVE", buf);
+}
+
+// Called when the selection or the value changes: stamps activity (for the
+// idle timeout) and pushes an immediate update so the panel never lags a turn.
 static void trimModeReport() {
     trimLastActivityMs = millis();
     DBGF("[TRIM] target %s = %d%%", trimSelName(), *trimSelected());
-    char buf[24];
-    snprintf(buf, sizeof(buf), "TRIM %s %+d%%", trimSelName(), *trimSelected());
-    uartSend("MFC", "ADJUST", buf);
+    trimLiveSend();
 }
 
 // 5-way edge detection while trimming: up/down picks the channel, left/right
@@ -2062,6 +2083,15 @@ void handleTrimMode() {
     if (right && !prevRight) { trimSelEnd     = 1; trimModeReport(); }
 
     prevUp = up; prevDown = down; prevLeft = left; prevRight = right;
+
+    // The screen has no "trim ended" message to react to — it closes the panel
+    // 1.5s after the last one arrives. So keep sending while the mode is on,
+    // well inside that window, and the live axis readout stays live even when
+    // nothing is being touched. Letting it lapse is also how the panel
+    // disappears on its own once the mode ends.
+    if (trimMode && (millis() - lastTrimLiveMs) >= TRIM_LIVE_MS) {
+        trimLiveSend();
+    }
 }
 
 static bool handleTrimCommand(String line) {
@@ -2430,7 +2460,11 @@ void handleMfcRotate(int8_t step) {
             // game to bind — the same gap FUEL had.
             triggerVirtualButton(step > 0 ? 23 : 24);
             sendGamepad();
-            uartSend("ERS", "MODE", ersModeNames[ersMode]);
+            // Report the action, not ersMode: that counter is local invention
+            // the game never sees or confirms, so broadcasting it as state was
+            // a label that drifted from reality. The screen shows the real
+            // deploy mode from telemetry instead.
+            uartSend("ERS", "STEP", step > 0 ? "UP" : "DN");
         } else if (item == MFC_FUEL) {
             int newFuel = fuelValue + step;
             if (newFuel < 0) newFuel = 0;
@@ -2439,9 +2473,8 @@ void handleMfcRotate(int8_t step) {
             // Virtual buttons 15 (UP) / 16 (DN) — see ERS above.
             triggerVirtualButton(step > 0 ? 15 : 16);
             sendGamepad();
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%d", fuelValue);
-            uartSend("FUEL", "VAL", buf);
+            // Action only — fuelValue is a local counter, not the car's mix.
+            uartSend("FUEL", "STEP", step > 0 ? "UP" : "DN");
         }
     } else {
         // Navigation mode - scroll through menu items
@@ -2759,6 +2792,24 @@ void updateClutches() {
         if (rawA > clutchCfg.hallMaxA) clutchCfg.hallMaxA = rawA;
         if (rawB < clutchCfg.hallMinB) clutchCfg.hallMinB = rawB;
         if (rawB > clutchCfg.hallMaxB) clutchCfg.hallMaxB = rawB;
+
+        // Show the sweep as it happens. The span is the number that matters:
+        // a narrow one is what turns the ADC's own noise floor into visible
+        // axis movement, and until now nothing reported it anywhere.
+        if (nowMs - lastCalibLiveMs >= CALIB_LIVE_MS) {
+            lastCalibLiveMs = nowMs;
+            // Bounds start seeded inverted, so a span is only real once the
+            // paddle has actually moved past its own starting point.
+            unsigned spanA = (clutchCfg.hallMaxA > clutchCfg.hallMinA)
+                           ? (unsigned)(clutchCfg.hallMaxA - clutchCfg.hallMinA) : 0u;
+            unsigned spanB = (clutchCfg.hallMaxB > clutchCfg.hallMinB)
+                           ? (unsigned)(clutchCfg.hallMaxB - clutchCfg.hallMinB) : 0u;
+            char buf[48];
+            snprintf(buf, sizeof(buf), "A %u-%u/%u B %u-%u/%u",
+                     clutchCfg.hallMinA, clutchCfg.hallMaxA, spanA,
+                     clutchCfg.hallMinB, clutchCfg.hallMaxB, spanB);
+            uartSend("CALIB", "LIVE", buf);
+        }
     }
 
     // Step 4: Map to -127..127 with endpoint clamp (mapHallToAxis handles it)
@@ -3095,9 +3146,20 @@ void handleMfcPress() {
                         okA ? "" : " KEPT", clutchCfg.hallMinA, clutchCfg.hallMaxA,
                         okB ? "" : " KEPT", clutchCfg.hallMinB, clutchCfg.hallMaxB,
                         shrinkA, shrinkB);
-                    // The screen only renders START/DONE/INVALID, so a partly
-                    // failed sweep still reports INVALID to get a popup.
-                    uartSend("CALIB", (okA && okB) ? "DONE" : "INVALID", "HALL");
+                    if (okA && okB) {
+                        // Spans, not "HALL": the screen parses this shape and
+                        // colours the result, so a narrow span announces itself
+                        // instead of having to be deduced later.
+                        char buf[24];
+                        snprintf(buf, sizeof(buf), "A%u B%u",
+                                 (unsigned)(clutchCfg.hallMaxA - clutchCfg.hallMinA),
+                                 (unsigned)(clutchCfg.hallMaxB - clutchCfg.hallMinB));
+                        uartSend("CALIB", "DONE", buf);
+                    } else {
+                        // A partly failed sweep still reports INVALID: the
+                        // screen renders that as an error popup.
+                        uartSend("CALIB", "INVALID", "HALL");
+                    }
                 }
             } else if (item == MFC_ENC_MODE) {
                 encoderButtonMode = !encoderButtonMode;
@@ -3119,7 +3181,7 @@ void handleMfcPress() {
                 saveConfig();
                 triggerVirtualButton(23);
                 sendGamepad();
-                uartSend("ERS", "MODE", ersModeNames[ersMode]);
+                uartSend("ERS", "STEP", "UP");   // a press always steps forward
             } else if (item == MFC_RESET) {
                 clutchCfg.mode = CLUTCH_DUAL;
                 clutchCfg.bitePoint = 60;
