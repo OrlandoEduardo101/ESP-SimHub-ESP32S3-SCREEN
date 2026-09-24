@@ -1258,14 +1258,27 @@ public:
 				calibShowingDone = false;
 			}
 			if (!calibPanelActive && !trimPanelActive) {
-				// Just closed on this exact tick. Clear right here instead of
-				// leaving stale panel pixels up until whichever path renders
-				// next -- if SimHub still isn't connected, the
-				// hasReceivedData==false path below never touches the screen
-				// at all, so that wait could be indefinite.
+				// Just closed on this exact tick. Restore whichever screen
+				// belongs here instead of leaving a bare fillScreen(BLACK) up
+				// -- reported live: trim ending left a black screen with
+				// nothing on it, forever, regardless of SimHub's state.
 				calibTrimFrameDrawn = false;
-				gfx->fillScreen(BLACK);
-				needsFullRedraw = false;  // handled right here; don't do it again downstream
+				if (hasReceivedData) {
+					// Let the normal telemetry path's own needsFullRedraw
+					// handling (further down, unchanged) do the clean
+					// redraw -- it already does exactly this for every other
+					// full-redraw case, no reason to duplicate it here. Does
+					// NOT return: falls through past hasReceivedData (true,
+					// so that check is skipped) into the render gate below,
+					// same tick.
+					needsFullRedraw = true;
+				} else {
+					// SimHub isn't connected -- there is no dashboard to
+					// return to yet, only the loading screen the board was
+					// showing before the panel opened.
+					showLoadingScreen();
+					needsFullRedraw = false;  // handled right here
+				}
 			} else {
 				const unsigned long nowMs = millis();
 				if (!redrawPending && !needsFullRedraw &&
