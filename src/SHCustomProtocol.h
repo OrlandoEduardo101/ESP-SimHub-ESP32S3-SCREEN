@@ -1234,6 +1234,51 @@ public:
 		}
 		prevDrsAvailable = drsAvailable;
 
+		// Calibration/trim panel -- checked before hasReceivedData, on purpose.
+		// It used to sit below the hasReceivedData return further down, which
+		// meant it could never draw at all with SimHub closed: calibrating and
+		// doing trim adjustment are bench activities, done specifically
+		// without SimHub running, which is exactly the hasReceivedData==false
+		// case -- the one scenario the panel matters most in was the one it
+		// couldn't reach. It consumes no telemetry, so there was never a real
+		// reason for the dependency.
+		//
+		// Has its own render-gate check (same redrawPending/heartbeat the
+		// telemetry path uses further down) rather than drawing unthrottled on
+		// every idle loop() iteration: drawCalibTrimPanel()'s row content is
+		// diffed against prevData, but its status line isn't, so calling it a
+		// few thousand times a second while idle would still hammer the
+		// display bus for nothing.
+		if (calibPanelActive || trimPanelActive) {
+			if (trimPanelActive && millis() - lastTrimLiveMs > TRIM_LIVE_TIMEOUT_MS) {
+				trimPanelActive = false;
+			}
+			if (calibShowingDone && millis() > calibDoneUntil) {
+				calibPanelActive = false;
+				calibShowingDone = false;
+			}
+			if (!calibPanelActive && !trimPanelActive) {
+				// Just closed on this exact tick. Clear right here instead of
+				// leaving stale panel pixels up until whichever path renders
+				// next -- if SimHub still isn't connected, the
+				// hasReceivedData==false path below never touches the screen
+				// at all, so that wait could be indefinite.
+				calibTrimFrameDrawn = false;
+				gfx->fillScreen(BLACK);
+				needsFullRedraw = false;  // handled right here; don't do it again downstream
+			} else {
+				const unsigned long nowMs = millis();
+				if (!redrawPending && !needsFullRedraw &&
+				    (nowMs - lastRedrawMs) < REDRAW_HEARTBEAT_MS) {
+					return;
+				}
+				redrawPending = false;
+				lastRedrawMs = nowMs;
+				drawCalibTrimPanel();
+				return;
+			}
+		}
+
 		if (!hasReceivedData) {
 			// Show loading animation on LEDs while waiting for SimHub
 			#ifdef INCLUDE_RGB_LEDS_NEOPIXELBUS
@@ -1271,34 +1316,8 @@ public:
 		}
 		const uint32_t pdT0 = micros();
 
-		// Calibration/trim panel takes over the whole screen -- above even
-		// critical SimHub alerts -- for as long as either is active. $TRIM has
-		// no DONE message, so its liveness is a timeout instead of an
-		// explicit end (see TRIM_LIVE_TIMEOUT_MS's comment). $CALIB's DONE
-		// summary holds for a fixed window (calibDoneUntil) before releasing
-		// the screen back to normal drawing.
-		if (trimPanelActive && millis() - lastTrimLiveMs > TRIM_LIVE_TIMEOUT_MS) {
-			trimPanelActive = false;
-			calibTrimFrameDrawn = false;
-			needsFullRedraw = true;
-		}
-		if (calibShowingDone && millis() > calibDoneUntil) {
-			calibPanelActive = false;
-			calibShowingDone = false;
-			calibTrimFrameDrawn = false;
-			needsFullRedraw = true;
-		}
-		if (calibPanelActive || trimPanelActive) {
-			if (needsFullRedraw) {
-				// Only reachable here if something above just cleared a stale
-				// panel on the same tick a new one started — draw the fresh
-				// one on a clean screen rather than over leftover pixels.
-				gfx->fillScreen(BLACK);
-				needsFullRedraw = false;
-			}
-			drawCalibTrimPanel();
-			return;
-		}
+		// (calibration/trim panel dispatch now lives above, before the
+		// hasReceivedData check -- see that block's comment for why)
 
 		// Check if we need full redraw after alert expired
 		if (needsFullRedraw) {
