@@ -201,9 +201,48 @@ private:
 	bool mapTrackDrawn    = false;
 	String mapLastTrackId = "";
 	bool p499FrameDrawn   = false;
+
+	// Calibration/trim live panel. This is deliberately NOT built on the
+	// overlay/popup system above (OverlayPriority/latchOverlay): that system
+	// is expiry-driven, right for a 3s toast, wrong for "stay up for as long
+	// as the user is turning a knob and watching the number." This takes over
+	// the whole screen instead, above even critical SimHub alerts, for as
+	// long as either flag below is true -- see the render-dispatch check
+	// that skips both the page switch and drawAlert() while active.
+	static const uint8_t CALIB_TRIM_MAX_CHANNELS = 4;
+	bool calibPanelActive = false;      // between $CALIB:START and a few seconds after $CALIB:DONE
+	bool calibShowingDone = false;      // true during the post-DONE summary hold
+	unsigned long calibDoneUntil = 0;
+	String calibChannelId[CALIB_TRIM_MAX_CHANNELS];
+	String calibChannelSpan[CALIB_TRIM_MAX_CHANNELS];  // "<min>-<max>/<span>", verbatim from the wheel
+	uint8_t calibChannelCount = 0;
+
+	// $TRIM:LIVE has no START/DONE pair, so liveness is inferred: still
+	// "active" as long as a LIVE line arrived recently. If the wheel leaves
+	// trim mode without announcing it, the panel clears itself within
+	// TRIM_LIVE_TIMEOUT_MS instead of being stuck up forever.
+	static const unsigned long TRIM_LIVE_TIMEOUT_MS = 1500;
+	bool trimPanelActive = false;
+	unsigned long lastTrimLiveMs = 0;
+	String trimContextLine = "";  // everything except the trailing two axis values, verbatim
+	String trimAxisA = "0";
+	String trimAxisB = "0";
+
+	bool calibTrimFrameDrawn = false;  // static frame (labels/borders) painted once per activation
 	static const unsigned long ALERT_DURATION_MS = 3000;  // Show alert for 3 seconds
 	bool popupFromUart = false;
 	unsigned long popupFromUartUntil = 0;
+
+	// ERS/FUEL step popups (see showErsStepPopup()/showFuelStepPopup()) don't
+	// carry fixed text: the wheel only tells us a button was pressed, and the
+	// game takes a frame or two to react, so text baked in at press time would
+	// show the value from *before* the press for most of the popup's life.
+	// Kind + direction are all that's fixed; drawAlert() recomputes the text
+	// from live telemetry on every redraw for as long as the window is open,
+	// so it catches up the moment the game's own state actually changes.
+	enum UartPopupKind : uint8_t { UART_POPUP_TEXT = 0, UART_POPUP_ERS, UART_POPUP_FUEL };
+	UartPopupKind uartPopupKind = UART_POPUP_TEXT;
+	bool uartPopupStepUp = true;
 	String prevAlertText = "";  // Track previous alert text to avoid resetting timer on same alert
 	enum OverlayPriority : uint8_t {
 		OVERLAY_NONE = 0,
@@ -543,9 +582,160 @@ public:
 	void showPopup(const String &msg, uint32_t durationMs = 2000) {
 		// Draw it on the next loop() instead of waiting for the 250ms heartbeat.
 		redrawPending = true;
+		uartPopupKind = UART_POPUP_TEXT;
 		uartPopupMessage = msg;
 		popupFromUart = true;
 		popupFromUartUntil = millis() + durationMs;
+	}
+
+	// $ERS:STEP:UP / $ERS:STEP:DN — the wheel only fired a button; it has no
+	// idea what the game actually did with it. uartPopupMessage is left blank
+	// on purpose: drawAlert() builds the real text from ersDeployMode/kersLevel
+	// fresh each redraw (see the comment on uartPopupKind).
+	void showErsStepPopup(bool up, uint32_t durationMs = 3000) {
+		redrawPending = true;
+		uartPopupKind = UART_POPUP_ERS;
+		uartPopupStepUp = up;
+		uartPopupMessage = "";
+		popupFromUart = true;
+		popupFromUartUntil = millis() + durationMs;
+	}
+
+	// $FUEL:STEP:UP / $FUEL:STEP:DN — same reasoning as showErsStepPopup().
+	void showFuelStepPopup(bool up, uint32_t durationMs = 3000) {
+		redrawPending = true;
+		uartPopupKind = UART_POPUP_FUEL;
+		uartPopupStepUp = up;
+		uartPopupMessage = "";
+		popupFromUart = true;
+		popupFromUartUntil = millis() + durationMs;
+	}
+
+	// $CALIB:START:HALL -- opens the panel immediately, before any live data
+	// exists yet, so it's on screen for the whole calibration from the first
+	// moment rather than only once numbers are available.
+	void startCalibPanel() {
+		redrawPending = true;
+		calibTrimFrameDrawn = false;
+		calibPanelActive = true;
+		calibShowingDone = false;
+		calibChannelCount = 0;
+	}
+
+	// $CALIB:INVALID -- calibration aborted; don't leave the panel stuck open
+	// with stale numbers.
+	void closeCalibPanel() {
+		calibPanelActive = false;
+		calibShowingDone = false;
+		calibTrimFrameDrawn = false;
+		needsFullRedraw = true;
+		redrawPending = true;
+	}
+
+	// $CALIB:LIVE:A 1782-2070/288 B 1790-2065/275 -- pairs of (channel id,
+	// span string) separated by spaces. Stored verbatim per channel: the wire
+	// format already is the display format ("<min>-<max>/<span>"), nothing to
+	// reconstruct. Malformed tail (a channel id with nothing after it) stops
+	// parsing rather than showing a channel with a blank span.
+	void handleCalibLive(const String &val) {
+		redrawPending = true;
+		calibPanelActive = true;
+		calibShowingDone = false;
+		calibChannelCount = 0;
+		int pos = 0;
+		int len = val.length();
+		while (pos < len && calibChannelCount < CALIB_TRIM_MAX_CHANNELS) {
+			while (pos < len && val[pos] == ' ') pos++;
+			if (pos >= len) break;
+			int idEnd = pos;
+			while (idEnd < len && val[idEnd] != ' ') idEnd++;
+			String id = val.substring(pos, idEnd);
+			pos = idEnd;
+			while (pos < len && val[pos] == ' ') pos++;
+			if (pos >= len) break;
+			int spanEnd = pos;
+			while (spanEnd < len && val[spanEnd] != ' ') spanEnd++;
+			calibChannelId[calibChannelCount] = id;
+			calibChannelSpan[calibChannelCount] = val.substring(pos, spanEnd);
+			calibChannelCount++;
+			pos = spanEnd;
+		}
+	}
+
+	// $CALIB:DONE:A288 B275 -- channel id immediately followed by the final
+	// span, no separator, repeated per channel. Returns false if val doesn't
+	// look like that shape at all (an un-updated wheel still sending the old
+	// "$CALIB:DONE:HALL"), so the caller can fall back to the legacy plain
+	// popup instead of showing a panel with garbage in it.
+	bool handleCalibDone(const String &val) {
+		String trimmed = val;
+		trimmed.trim();
+		int len = trimmed.length();
+		if (len == 0) return false;
+
+		String ids[CALIB_TRIM_MAX_CHANNELS];
+		String spans[CALIB_TRIM_MAX_CHANNELS];
+		uint8_t count = 0;
+		int pos = 0;
+		while (pos < len && count < CALIB_TRIM_MAX_CHANNELS) {
+			while (pos < len && trimmed[pos] == ' ') pos++;
+			if (pos >= len) break;
+			if (!isAlpha(trimmed[pos])) return false;  // not this shape at all
+			int idEnd = pos + 1;
+			int numEnd = idEnd;
+			while (numEnd < len && isDigit(trimmed[numEnd])) numEnd++;
+			if (numEnd == idEnd) return false;  // letter with no digits -- not this shape
+			ids[count] = trimmed.substring(pos, idEnd);
+			spans[count] = trimmed.substring(idEnd, numEnd);
+			count++;
+			pos = numEnd;
+		}
+		if (count == 0) return false;
+
+		redrawPending = true;
+		calibPanelActive = true;
+		calibShowingDone = true;
+		calibDoneUntil = millis() + 4000;  // hold the final numbers on screen briefly, then resume normal drawing
+		calibChannelCount = count;
+		for (uint8_t i = 0; i < count; i++) {
+			calibChannelId[i] = ids[i];
+			calibChannelSpan[i] = spans[i];  // final span only -- DONE carries no min/max, just the result
+		}
+		return true;
+	}
+
+	// $TRIM:LIVE:A MIN +5% ax -127 -127 -- format may drift since the wheel
+	// side is developed separately from this. Robust to that on purpose: the
+	// last two space-separated tokens are always taken as the two live axis
+	// values (what the user actually watches while turning the knob),
+	// everything before them shown verbatim as context underneath, whatever
+	// it happens to contain.
+	void handleTrimLive(const String &val) {
+		redrawPending = true;
+		trimPanelActive = true;
+		lastTrimLiveMs = millis();
+
+		String v = val;
+		v.trim();
+		int lastSpace = v.lastIndexOf(' ');
+		if (lastSpace < 0) {
+			trimContextLine = v;
+			trimAxisA = "";
+			trimAxisB = "";
+			return;
+		}
+		String b = v.substring(lastSpace + 1);
+		String rest = v.substring(0, lastSpace);
+		rest.trim();
+		int secondLastSpace = rest.lastIndexOf(' ');
+		if (secondLastSpace < 0) {
+			trimAxisA = rest;
+			trimContextLine = "";
+		} else {
+			trimAxisA = rest.substring(secondLastSpace + 1);
+			trimContextLine = rest.substring(0, secondLastSpace);
+		}
+		trimAxisB = b;
 	}
 
 	void pageNextExternal(const char *src = "?") {
@@ -1041,6 +1231,35 @@ public:
 			lastRedrawMs = nowMs;
 		}
 		const uint32_t pdT0 = micros();
+
+		// Calibration/trim panel takes over the whole screen -- above even
+		// critical SimHub alerts -- for as long as either is active. $TRIM has
+		// no DONE message, so its liveness is a timeout instead of an
+		// explicit end (see TRIM_LIVE_TIMEOUT_MS's comment). $CALIB's DONE
+		// summary holds for a fixed window (calibDoneUntil) before releasing
+		// the screen back to normal drawing.
+		if (trimPanelActive && millis() - lastTrimLiveMs > TRIM_LIVE_TIMEOUT_MS) {
+			trimPanelActive = false;
+			calibTrimFrameDrawn = false;
+			needsFullRedraw = true;
+		}
+		if (calibShowingDone && millis() > calibDoneUntil) {
+			calibPanelActive = false;
+			calibShowingDone = false;
+			calibTrimFrameDrawn = false;
+			needsFullRedraw = true;
+		}
+		if (calibPanelActive || trimPanelActive) {
+			if (needsFullRedraw) {
+				// Only reachable here if something above just cleared a stale
+				// panel on the same tick a new one started — draw the fresh
+				// one on a clean screen rather than over leftover pixels.
+				gfx->fillScreen(BLACK);
+				needsFullRedraw = false;
+			}
+			drawCalibTrimPanel();
+			return;
+		}
 
 		// Check if we need full redraw after alert expired
 		if (needsFullRedraw) {
@@ -2202,6 +2421,118 @@ public:
 	void idle() {
 	}
 
+	// ── CALIBRATION / TRIM LIVE PANEL ────────────────────────────────
+	// Takes the whole screen while calibPanelActive or trimPanelActive is
+	// true -- see the render-dispatch check that skips the normal page
+	// switch and drawAlert() while either is set, and the comment on the
+	// state fields themselves for why this isn't built on the overlay
+	// system.
+	//
+	// Span colour bands (calib only) are a judgement call, not a value from
+	// the wheel: the user's own account of the failure mode was "a span
+	// this narrow, around 300 counts, turns ADC noise into visible axis
+	// oscillation" -- red below 400, yellow 400-800, green above, so the
+	// number that matters is legible at a glance without doing the math
+	// during the physical act of calibrating.
+	void drawCalibTrimPanel() {
+		if (!canUseDisplay()) return;
+
+		const int W = SCREEN_WIDTH;
+		const uint16_t BG  = BLACK;
+		const uint16_t LBL = RGB565(140, 140, 150);
+		const uint16_t ROW_BG = RGB565(20, 20, 24);
+
+		auto spanColor = [](long span) -> uint16_t {
+			if (span < 400) return RED;
+			if (span < 800) return YELLOW;
+			return GREEN;
+		};
+		// Pull the trailing "/<digits>" off a "<min>-<max>/<span>" string, or
+		// parse a bare span number (the DONE format has no slash at all).
+		auto extractSpan = [](const String &s) -> long {
+			int slash = s.lastIndexOf('/');
+			String num = slash >= 0 ? s.substring(slash + 1) : s;
+			return num.toInt();
+		};
+
+		if (!calibTrimFrameDrawn) {
+			gfx->fillScreen(BG);
+			gfx->setTextColor(LBL);
+			gfx->setTextSize(2);
+			gfx->setCursor(10, 10);
+			gfx->print(calibPanelActive ? "CALIBRACAO HALL" : "TRIM");
+			calibTrimFrameDrawn = true;
+			// Force every row below to repaint against the fresh background.
+			prevData.erase("ctp_rows");
+			prevData.erase("ctp_ctx");
+			prevData.erase("ctp_axis");
+		}
+
+		if (calibPanelActive) {
+			gfx->fillRect(0, 40, W, 26, BG);
+			gfx->setTextColor(calibShowingDone ? GREEN : YELLOW);
+			gfx->setTextSize(2);
+			gfx->setCursor(10, 44);
+			gfx->print(calibShowingDone ? "FINALIZADA - solte os paddles" : "Mova os paddles ate o fim, os dois sentidos");
+
+			String rowsKey;
+			for (uint8_t i = 0; i < calibChannelCount; i++) rowsKey += calibChannelId[i] + calibChannelSpan[i] + "|";
+			if (prevData["ctp_rows"] != rowsKey) {
+				gfx->fillRect(0, 80, W, 220, BG);
+				int y = 90;
+				for (uint8_t i = 0; i < calibChannelCount; i++) {
+					long span = extractSpan(calibChannelSpan[i]);
+					uint16_t col = spanColor(span);
+					gfx->fillRect(10, y, W - 20, 46, ROW_BG);
+					gfx->setTextColor(LBL); gfx->setTextSize(2);
+					gfx->setCursor(20, y + 6);
+					gfx->print("Canal "); gfx->print(calibChannelId[i]);
+					gfx->setTextColor(col); gfx->setTextSize(3);
+					gfx->setCursor(20, y + 24);
+					gfx->print(calibChannelSpan[i]);
+					if (!calibShowingDone) {
+						// LIVE carries "<min>-<max>/<span>"; DONE carries only
+						// the span, so the unit label only applies to LIVE.
+						gfx->setTextColor(LBL); gfx->setTextSize(1);
+						gfx->setCursor(W - 90, y + 30);
+						gfx->print("counts");
+					}
+					y += 54;
+				}
+				prevData["ctp_rows"] = rowsKey;
+			}
+		} else if (trimPanelActive) {
+			if (prevData["ctp_ctx"] != trimContextLine) {
+				gfx->fillRect(0, 40, W, 30, BG);
+				gfx->setTextColor(LBL); gfx->setTextSize(2);
+				gfx->setCursor(10, 44);
+				gfx->print(trimContextLine);
+				prevData["ctp_ctx"] = trimContextLine;
+			}
+
+			String axisKey = trimAxisA + "|" + trimAxisB;
+			if (prevData["ctp_axis"] != axisKey) {
+				gfx->fillRect(0, 90, W, 180, BG);
+				// Priorize legibilidade: the two live axis numbers are the
+				// biggest text this display ever draws anywhere.
+				gfx->setTextColor(WHITE); gfx->setTextSize(8);
+				int16_t bx, by; uint16_t bw, bh;
+				gfx->getTextBounds(trimAxisA, 0, 0, &bx, &by, &bw, &bh);
+				gfx->setCursor((W / 2 - (int)bw) / 2, 100);
+				gfx->print(trimAxisA);
+				gfx->getTextBounds(trimAxisB, 0, 0, &bx, &by, &bw, &bh);
+				gfx->setCursor(W / 2 + (W / 2 - (int)bw) / 2, 100);
+				gfx->print(trimAxisB);
+				gfx->setTextColor(LBL); gfx->setTextSize(1);
+				gfx->setCursor(W / 4 - 10, 200);
+				gfx->print("EIXO A");
+				gfx->setCursor(3 * W / 4 - 10, 200);
+				gfx->print("EIXO B");
+				prevData["ctp_axis"] = axisKey;
+			}
+		}
+	}
+
 	// ── PAGE 8 — 499P ───────────────────────────────────────────────
 	// Modelled on the real Ferrari 499P wheel dash: black background, small
 	// grey labels above each value, a big white gear between two thin
@@ -2781,8 +3112,27 @@ public:
 		}
 
 		// PRIORIDADE 3: Pop-up do menu MFC/UART
-		String uartPopupNormalized = uartPopupMessage;
-		uartPopupNormalized.trim();
+		//
+		// UART_POPUP_ERS/FUEL are built here, fresh, every time this runs while
+		// popupFromUartUntil hasn't passed -- not once when the button press
+		// arrived. The wheel only knows it fired a button; the game takes a
+		// frame or two to actually change ersDeployMode/kersLevel/fuel, so a
+		// value captured at press time would show the pre-press state for most
+		// of the popup's life. Recomputing here means the moment the real
+		// telemetry frame changes (which raises redrawPending on its own), the
+		// same popup instance shows the post-press value without waiting for a
+		// new button press or reopening anything.
+		String uartPopupNormalized;
+		if (uartPopupKind == UART_POPUP_ERS) {
+			uartPopupNormalized = String(uartPopupStepUp ? "ERS ^ " : "ERS v ") +
+				ersDeployMode + " " + kersLevel + "%";
+		} else if (uartPopupKind == UART_POPUP_FUEL) {
+			uartPopupNormalized = String(uartPopupStepUp ? "FUEL ^ " : "FUEL v ") +
+				fuelRemainingLaps + "L " + fuelLitersPerLap + "L/L";
+		} else {
+			uartPopupNormalized = uartPopupMessage;
+			uartPopupNormalized.trim();
+		}
 		if (popupFromUart && uartPopupNormalized.length() > 0 && popupFromUartUntil > now) {
 			String uartPopupUpper = uartPopupNormalized;
 			uartPopupUpper.toUpperCase();

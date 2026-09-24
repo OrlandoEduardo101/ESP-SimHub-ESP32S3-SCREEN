@@ -643,6 +643,18 @@ void processButtonBoxLine(const String &line) {
 	func.trim();
 	val.trim();
 
+	// Diagnostic for the "MFC popups never appear" report: everything from
+	// dispatch through showPopup()/drawAlert()/latchOverlay() reads correct on
+	// the screen side (priority 3 beats both SimHub priorities unconditionally
+	// in latchOverlay(), and drawAlert() runs unconditionally past the redraw
+	// gate whenever redrawPending is set, which showPopup() does). Nothing
+	// here can inject test traffic onto WheelSerial to prove it end to end, so
+	// this prints exactly what was parsed, on the screen's own USB CDC Serial
+	// -- if this line never appears while the wheel is confirmed sending (per
+	// its own debug monitor), the gap is upstream of this function entirely
+	// (wiring, baud, pin mapping) rather than in the popup/overlay logic.
+	debugLog("[BB-UART] cat=" + cat + " func=" + func + " val=" + val);
+
 	// UART handshake: Wheel -> WT32 ping, WT32 -> Wheel pong
 	// Expected incoming: $BB:PING:<seq>
 	if (cat == "BB" && func == "PING") {
@@ -695,11 +707,28 @@ void processButtonBoxLine(const String &line) {
 	} else if (cat == "CLUTCH" && func == "MODE") {
 		msg = String("CLUTCH: ") + val;
 	} else if (cat == "CALIB" && func == "START") {
-		msg = String("CALIB: ") + val;
+		shCustomProtocol.startCalibPanel();
+		msg = "";
+	} else if (cat == "CALIB" && func == "LIVE") {
+		shCustomProtocol.handleCalibLive(val);
+		msg = "";
 	} else if (cat == "CALIB" && func == "DONE") {
-		msg = String("CALIB OK: ") + val;
+		// New wheel firmware sends "A288 B275" (final span per channel), shown
+		// in the panel opened by CALIB:START/LIVE. An un-updated wheel still
+		// sends the old plain "HALL" -- handleCalibDone() returns false for
+		// anything that doesn't look like the new shape, and the legacy popup
+		// below covers that case exactly as it always did.
+		if (!shCustomProtocol.handleCalibDone(val)) {
+			msg = String("CALIB OK: ") + val;
+		} else {
+			msg = "";
+		}
 	} else if (cat == "CALIB" && func == "INVALID") {
+		shCustomProtocol.closeCalibPanel();
 		msg = String("CALIB ERR: ") + val;
+	} else if (cat == "TRIM" && func == "LIVE") {
+		shCustomProtocol.handleTrimLive(val);
+		msg = "";
 	} else if (cat == "SYS" && func == "BOOT") {
 		msg = String("BOOT: ") + val;
 	} else if (cat == "SYS" && func == "RESET") {
@@ -714,6 +743,23 @@ void processButtonBoxLine(const String &line) {
 		msg = "WIFI: RESET CFG (reboot)";
 	} else if (cat == "BLE" && func == "STATE") {
 		msg = String("BLE: ") + val;
+	} else if (cat == "ERS" && func == "STEP") {
+		// New protocol: the wheel only reports the button press. The real
+		// ERS mode/battery comes from SimHub telemetry (ersDeployMode,
+		// kersLevel), computed fresh on every redraw in drawAlert() -- see
+		// showErsStepPopup()'s comment for why (game reaction lag).
+		shCustomProtocol.showErsStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "FUEL" && func == "STEP") {
+		shCustomProtocol.showFuelStepPopup(val == "UP");
+		msg = "";
+	} else if (cat == "ERS" && func == "MODE") {
+		// Legacy protocol from an un-updated wheel firmware: it invented this
+		// label from a local counter that never tracked the game's real ERS
+		// state. Shown as-is for compatibility, but it is not telemetry.
+		msg = String("ERS: ") + val + " (wheel)";
+	} else if (cat == "FUEL" && func == "VAL") {
+		msg = String("FUEL: ") + val + "% (wheel)";
 	} else if (cat == "MEDIA") {
 		msg = String("MEDIA: ") + func;
 	} else {
