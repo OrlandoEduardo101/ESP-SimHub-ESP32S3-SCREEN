@@ -47,9 +47,15 @@ $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
     -Argument "/c `"`"$PythonPath`" -u `"$ScriptPath`" >> `"$LogPath`" 2>&1`""
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn
+# [TimeSpan]::MaxValue serializes to "P99999999DT23H59M59S", which the Task
+# Scheduler XML schema rejects outright (Register-ScheduledTask fails with
+# "O XML da tarefa contem um valor formatado incorretamente"). A whole
+# number of days serializes cleanly (e.g. "P3650D"); 10 years is long enough
+# that this never needs re-registering in practice, and an AtLogOn trigger
+# fires again on every logon regardless, refreshing the window anyway.
 $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes 1) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)).Repetition
+    -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition
 
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -57,9 +63,14 @@ $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGo
 
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
+# -ErrorAction Stop: a failed registration must stop the script here, not
+# fall through to "registrada" and then a confusing Start-ScheduledTask
+# failure on a task that was never actually created -- which is exactly
+# what happened with the MaxValue duration above.
 Register-ScheduledTask -TaskName $TaskName -Trigger $trigger -Action $action `
-    -Principal $principal -Settings $settings `
-    -Description 'Keeps the SimHub-to-ESP32 serial-TCP bridge (scripts/serial_tcp_bridge.py) running, restarting it within a minute if it dies. Replaces HW VSP3 for the WiFi dashboard path -- see docs/WIRELESS.md.'
+    -Principal $principal -Settings $settings -ErrorAction Stop `
+    -Description 'Keeps the SimHub-to-ESP32 serial-TCP bridge (scripts/serial_tcp_bridge.py) running, restarting it within a minute if it dies. Replaces HW VSP3 for the WiFi dashboard path -- see docs/WIRELESS.md.' `
+    | Out-Null
 
 Write-Host "Tarefa '$TaskName' registrada. Log: $LogPath"
 Write-Host "Iniciando agora (nao precisa esperar o proximo logon):"
